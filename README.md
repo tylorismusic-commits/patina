@@ -4,7 +4,7 @@ A five-model saturation plugin for Linux, in the same visual language as Comp
 Suite. Patina runs as a quick single-band saturator or as a two-, three- or
 four-band multiband colour box with a different model per band. GPL-3.0-or-later.
 
-The CLAP bundle is built and installable; LV2 wiring is next.
+CLAP and LV2 bundles are built and installable.
 
 ## Models
 
@@ -47,6 +47,14 @@ display):
 - Switching from single-band seeds all four bands with the current sound;
   switching back carries the selected band into single-band mode.
 
+## LV2
+
+The LV2 bundle is `patina.lv2`, with the plugin URI
+`https://github.com/tylorismusic-commits/patina` and an X11 UI. The 48
+parameters are control ports, followed by band meters, peak/VU meters, 128
+FFT spectrum bins and a `lv2:latency` port. Fourteen factory presets are
+generated into `presets.ttl` from the same tables as the CLAP presets.
+
 ## Shared DSP
 
 Filters, ADAA shaping, oversampling, the Linkwitz-Riley crossovers, the FFT
@@ -58,22 +66,25 @@ consumed as a submodule. No DSP code is copied from Comp Suite.
 
 ```sh
 tar xzf Patina-<version>-clap.tar.gz -C ~/.clap
+tar xzf patina-<version>-lv2.tar.gz -C ~/.lv2
 ```
 
-Restart the host or rescan CLAP plugins.
+Restart the host or rescan CLAP/LV2 plugins. REAPER scans both user
+directories at startup.
 
 ## Build
 
 ```sh
 git submodule update --init --recursive
-cmake -S . -B build -DCLAP_DIR="$HOME/.clap"
+cmake -S . -B build -DCLAP_DIR="$HOME/.clap" -DLV2_DIR="$HOME/.lv2"
 cmake --build build -j
 ctest --test-dir build --output-on-failure
 cmake --install build
 ```
 
-The host smoke test runs under `xvfb-run` and drives every model, the
-oversampling latency handshake, state save/load and the embedded editor.
+The CLAP and LV2 host smoke tests run under `xvfb-run` and drive every model,
+the oversampling latency handshake, state save/load, the LV2 UI handshake and
+the embedded editor.
 
 Render the panel previews:
 
@@ -91,10 +102,10 @@ Render the panel previews:
   crossovers
 - [x] Real-time FFT spectrum display
 - [x] CLAP
-- [ ] LV2
+- [x] LV2 with an X11/Cairo editor
 - [x] Host/state/latency integration
 
-The previews and the CLAP editor render from the same Panel class. Multiband
+The previews, CLAP editor and LV2 editor render from the same Panel class. Multiband
 previews are in `docs/patina-mb-low.png`, `patina-mb-lomid.png`,
 `patina-mb-himid.png`, `patina-mb-high.png`, `patina-mb-2band.png`,
 `patina-mb-3band.png`, `patina-mb-scope.png` and `patina-mb-spectrum.png`;

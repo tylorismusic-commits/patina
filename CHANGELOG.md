@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0 — 2026-11-16
+
+### Added
+
+- **LV2 plugin and X11/Cairo UI.** The same five models, single/2/3/4-band
+  layout, per-band controls, draggable crossovers, oversampling, Auto Gain
+  and FFT spectrum as the CLAP version.
+- **Generated LV2 metadata.** `lv2/patina.ttl`, `manifest.ttl` and
+  `presets.ttl` come from `src/params.hpp` and `src/presets.hpp`; the test
+  fails if the committed files are stale.
+- **Full LV2 meter surface.** 48 parameter control ports, four band level
+  outputs, input/output peak and VU meters, all 128 spectrum bins and an
+  `lv2:latency` port.
+- **Fourteen LV2 presets** with complete parameter values, so host preset
+  changes cannot inherit stale band or crossover state.
+- **LV2 host tests** using lilv, plus a direct X11 UI host test for the
+  resize handshake, idle throttle and meter/spectrum port events.
+
 ## 0.4.1 — 2026-11-15
 
 ### Fixed
