@@ -252,13 +252,6 @@ public:
     const bool previousMultiband = controls_.multiband;
     controls_ = c;
     controls_.bandCount = std::min(std::max(c.bandCount, 2), 4);
-    int selected =
-        std::min(std::max(c.selectedBand, 0), 3);
-    if (activeBandIndex(controls_.bandCount, selected) < 0) {
-      selected = activeBandSlot(controls_.bandCount,
-                                controls_.bandCount >= 3 ? 1 : 0);
-    }
-    controls_.selectedBand = selected;
     if (controls_.soloBand >= 0 &&
         activeBandIndex(controls_.bandCount, controls_.soloBand) < 0) {
       controls_.soloBand = -1;

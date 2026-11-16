@@ -101,7 +101,6 @@ public:
   // (that made the editor fail to load in REAPER).
   void resize(double scale) {
     scale_.store(clampScale(scale), std::memory_order_relaxed);
-    resizePending_.store(true, std::memory_order_relaxed);
   }
 
   bool open(void* parent) {
@@ -178,8 +177,6 @@ private:
     panel_.loadFont(bundleResourceDir());
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      display_ = dpy;
-      window_ = win;
       opened_ = true;
       cv_.notify_all();
     }
@@ -239,9 +236,8 @@ private:
         state_.presetDirty = false;
         state_.presetOpen = 0;
         state_.presetScroll = 0;
-        state_.inLevel = state_.inLevelL = state_.inLevelR = -120.0f;
-        state_.outLevel = state_.outLevelL = state_.outLevelR = -120.0f;
-        state_.outPeakHold = -120.0f;
+        state_.inLevelL = state_.inLevelR = -120.0f;
+        state_.outLevelL = state_.outLevelR = -120.0f;
         for (int b = 0; b < kBandCount; ++b) {
           state_.bandLevel[b] = -120.0f;
         }
@@ -285,11 +281,6 @@ private:
     if (windowSurface) {
       cairo_surface_destroy(windowSurface);
     }
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      display_ = nullptr;
-      window_ = 0;
-    }
     XDestroyWindow(dpy, win);
     XCloseDisplay(dpy);
   }
@@ -299,7 +290,6 @@ private:
     const double s = scale();
     switch (ev.type) {
       case ButtonPress: {
-        const bool fine = (ev.xbutton.state & ShiftMask) != 0;
         const double x = ev.xbutton.x / s;
         const double y = ev.xbutton.y / s;
         if (ev.xbutton.button == Button4) {
@@ -307,7 +297,7 @@ private:
         } else if (ev.xbutton.button == Button5) {
           panel_.wheel(shared_, state_, x, y, -1.0);
         } else if (ev.xbutton.button == Button1) {
-          panel_.pointerDown(shared_, state_, x, y, fine);
+          panel_.pointerDown(shared_, state_, x, y);
         }
         break;
       }
@@ -329,12 +319,9 @@ private:
   PanelState state_;
   Panel panel_;
   std::atomic<double> scale_{1.0};
-  std::atomic<bool> resizePending_{false};
   std::atomic<bool> resetUi_{false};
   std::mutex mutex_;
   std::condition_variable cv_;
-  Display* display_ = nullptr;
-  Window window_ = 0;
   Window parentWindow_ = 0;
   bool opened_ = false;
   bool openFailed_ = false;
@@ -361,6 +348,10 @@ struct Plugin {
   std::atomic<bool> resetEngine{false};
 };
 
+const char* const kFeatures[] = {CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,
+                                 CLAP_PLUGIN_FEATURE_DISTORTION,
+                                 CLAP_PLUGIN_FEATURE_STEREO, nullptr};
+
 const clap_plugin_descriptor_t kDescriptor = {
     CLAP_VERSION,
     kPluginId,
@@ -371,12 +362,8 @@ const clap_plugin_descriptor_t kDescriptor = {
     "",
     kVersion,
     "Five saturation models in one plugin: Valve, Console, Bus, Tape and Transformer.",
-    nullptr,
+    kFeatures,
 };
-
-const char* const kFeatures[] = {CLAP_PLUGIN_FEATURE_AUDIO_EFFECT,
-                                 CLAP_PLUGIN_FEATURE_DISTORTION,
-                                 CLAP_PLUGIN_FEATURE_STEREO, nullptr};
 
 void writeName(char* dst, size_t size, const char* src) {
   std::strncpy(dst, src, size - 1);

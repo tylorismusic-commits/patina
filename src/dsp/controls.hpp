@@ -13,15 +13,7 @@ enum class Model : int {
   Count = 5,
 };
 
-enum class Band : int {
-  Low = 0,
-  LowMid = 1,
-  HighMid = 2,
-  High = 3,
-  Count = 4,
-};
-
-constexpr int kBandCount = static_cast<int>(Band::Count);
+constexpr int kBandCount = 4;
 constexpr int kSpectrumBins = 128;
 
 // Which per-band slot is used by each position in 2/3/4-band mode.  Two
@@ -61,7 +53,6 @@ struct Controls {
   bool enabled = true;
   bool multiband = false;
   int bandCount = 4;
-  int selectedBand = 1;
   int soloBand = -1;
   float xover1 = 120.0f;  // Hz
   float xover2 = 900.0f;  // Hz

@@ -25,13 +25,10 @@ struct PanelState {
   bool presetDirty = false;
   int presetOpen = 0;
   int presetScroll = 0;
-  float inLevel = 0.0f;
-  float outLevel = 0.0f;
   float inLevelL = 0.0f;
   float inLevelR = 0.0f;
   float outLevelL = 0.0f;
   float outLevelR = 0.0f;
-  float outPeakHold = 0.0f;
   float bandLevel[kBandCount] = {-120.0f, -120.0f, -120.0f, -120.0f};
   float spectrum[kSpectrumBins] = {};
 };
@@ -47,8 +44,7 @@ public:
   void tick(const Shared& shared, PanelState& state) const;
   void draw(cairo_t* cr, Shared& shared, const PanelState& state);
 
-  bool pointerDown(Shared& shared, PanelState& state, double x, double y,
-                   bool fine);
+  bool pointerDown(Shared& shared, PanelState& state, double x, double y);
   bool pointerMove(Shared& shared, PanelState& state, double x, double y,
                    bool fine);
   void pointerUp();
@@ -59,21 +55,6 @@ public:
   void drawPresetList(cairo_t* cr, const Shared& shared,
                       const PanelState& state) const;
   bool wheel(Shared& shared, PanelState& state, double x, double y, double dy);
-  bool dragging() const { return dragParam_ >= 0; }
-  void markEdited(PanelState& state) const { state.presetDirty = true; }
-
-  struct WidgetRect {
-    uint32_t param = 0;
-    double x = 0.0;
-    double y = 0.0;
-    double w = 0.0;
-    double h = 0.0;
-    double r = 0.0;
-    const char* label = "";
-    bool knob = false;
-    bool toggle = false;
-  };
-  std::vector<WidgetRect> widgetRects() const;
 
 private:
   enum class Kind {
@@ -98,15 +79,13 @@ private:
     double w = 0.0;
     double h = 0.0;
     double r = 0.0;
-    int steps = 0;
     double scaleRadius = 1.44;
     const char* label = "";
     std::vector<const char*> scale;
     bool labelBelow = false;
-    std::vector<const char*> buttonText;
   };
 
-  void layout(const Shared& shared, const PanelState& state);
+  void layout(const Shared& shared);
   void drawHeader(cairo_t* cr, const Shared& shared,
                   const PanelState& state) const;
   void drawBody(cairo_t* cr, int model) const;
@@ -128,8 +107,6 @@ private:
   void drawPill(cairo_t* cr, const Widget& w, bool on, int model) const;
   void text(cairo_t* cr, const char* s, double x, double y, double size,
             int align, double r, double g, double b) const;
-  double knobValue(const Shared& shared, const Widget& w) const;
-  bool isLit(const Shared& shared, const Widget& w) const;
   bool hitWidget(const Widget& w, double x, double y) const;
 
   int selectedBand(const Shared& shared) const;
@@ -139,9 +116,7 @@ private:
   int dragParam_ = -1;
   bool dragCrossover_ = false;
   double dragStartY_ = 0.0;
-  double dragStartX_ = 0.0;
   double dragStartValue_ = 0.0;
-  int dragSteps_ = 0;
   double displayX_ = 182.0;
   double displayW_ = 546.0;
 

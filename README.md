@@ -20,7 +20,7 @@ The CLAP bundle is built and installable; LV2 wiring is next.
 
 Single-band: Drive · Character · Tone · Mix · Output · Auto Gain ·
 Oversampling (Off/2×/4×). The display switches between **Shape** (transfer
-curve), **Scope** (input vs shaped sine) and **Off**.
+curve), **Scope** (input vs shaped sine), **Spec** (FFT spectrum) and **Off**.
 
 ### Multiband
 
@@ -38,8 +38,8 @@ display):
   faded fully out or pushed hard.
 - The model tabs and knobs edit the selected band; the band row switches
   between the active bands.
-- **Bands** shows the four regions, live band meters, crossover handles and
-  the input FFT spectrum. **Scope** draws the selected band's shaped waveform.
+- **Bands** shows the active band regions, live band meters, crossover
+  handles and the input FFT spectrum. **Scope** draws the selected band's shaped waveform.
   **Spec** shows the spectrum full-size. **Off** hides the overlays.
 - The spectrum is a 2048-point FFT analysed every 1024 samples, mapped to 128
   log-spaced bins from 20 Hz to 20 kHz.
@@ -53,6 +53,14 @@ Filters, ADAA shaping, oversampling, the Linkwitz-Riley crossovers, the FFT
 spectrum analyser and the meter helpers come from
 [`hearth-dsp`](https://github.com/tylorismusic-commits/hearth-dsp) 0.3.0,
 consumed as a submodule. No DSP code is copied from Comp Suite.
+
+## Install
+
+```sh
+tar xzf Patina-<version>-clap.tar.gz -C ~/.clap
+```
+
+Restart the host or rescan CLAP plugins.
 
 ## Build
 
@@ -76,7 +84,7 @@ Render the panel previews:
 ## Status
 
 - [x] Five-model saturation engine with ADAA and Off/2×/4× oversampling
-- [x] Panel in the Comp Suite visual language (shape/scope displays)
+- [x] Panel in the Comp Suite visual language (shape/scope/spectrum displays)
 - [x] Factory presets
 - [x] DSP tests
 - [x] Two-, three- and four-band multiband modes with per-band models and

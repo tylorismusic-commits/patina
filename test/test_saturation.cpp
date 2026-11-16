@@ -133,7 +133,6 @@ int main() {
     engine.prepare(kSr);
     Controls c = multiControls(0);
     c.bandCount = count;
-    c.selectedBand = activeBandSlot(count, count >= 3 ? 1 : 0);
     engine.setControls(c);
     Meters meters;
     std::vector<float> l(256), r(256);
@@ -166,7 +165,6 @@ int main() {
     engine.prepare(kSr);
     Controls c = multiControls(0);
     c.bandCount = count;
-    c.selectedBand = activeBandSlot(count, 0);
     auto measure = [&]() {
       Meters meters;
       std::vector<float> l(256), r(256);

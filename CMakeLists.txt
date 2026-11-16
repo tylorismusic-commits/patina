@@ -38,6 +38,9 @@ endif()
 add_executable(patina_preview test/ui_preview.cpp)
 target_link_libraries(patina_preview PRIVATE patina_ui)
 target_compile_features(patina_preview PRIVATE cxx_std_17)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(patina_preview PRIVATE -Wall -Wextra)
+endif()
 
 # ---------------------------------------------------------------------------
 # CLAP plugin: five saturation models, one X11/Cairo editor.
@@ -75,12 +78,25 @@ install(TARGETS patina LIBRARY DESTINATION "${CLAP_DIR}")
 install(FILES ${PATINA_RESOURCE_FILES}
         DESTINATION "${CLAP_DIR}/Patina.resources")
 
+# Release tarball: the CLAP bundle plus its resources, ready for ~/.clap.
+add_custom_target(dist
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/dist"
+  COMMAND ${CMAKE_COMMAND} -E tar czf
+          "${CMAKE_BINARY_DIR}/dist/Patina-${PROJECT_VERSION}-clap.tar.gz"
+          Patina.clap Patina.resources
+  WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/clap"
+  DEPENDS patina_bundle
+  COMMENT "Packing Patina-${PROJECT_VERSION}")
+
 find_library(XTST_LIBRARY Xtst)
 find_program(XVFB_RUN xvfb-run)
 add_executable(patina_clap_host_test test/clap_host_test.cpp)
 target_include_directories(patina_clap_host_test PRIVATE
   "${CMAKE_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/third_party/clap/include")
 target_link_libraries(patina_clap_host_test PRIVATE PkgConfig::X11 ${CMAKE_DL_LIBS})
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(patina_clap_host_test PRIVATE -Wall -Wextra)
+endif()
 if(XTST_LIBRARY)
   target_link_libraries(patina_clap_host_test PRIVATE ${XTST_LIBRARY})
 else()

@@ -62,11 +62,10 @@ clap_host_t makeHost() {
   return host;
 }
 
-int gCallbacks = 0;
 int gLatencyChanges = 0;
 int gRestarts = 0;
 
-void hostRequestCallback(const clap_host_t*) { ++gCallbacks; }
+void hostRequestCallback(const clap_host_t*) {}
 void hostLatencyChanged(const clap_host_t*) { ++gLatencyChanges; }
 void hostRequestRestart(const clap_host_t*) { ++gRestarts; }
 
@@ -588,7 +587,7 @@ int main(int argc, char** argv) {
     std::vector<unsigned char> raw(16 + patina::P_COUNT * 8 + 8);
     uint32_t hdr[4] = {0x50544E41u, 4u, patina::P_COUNT, 0u};
     double vals[patina::P_COUNT];
-    for (int i = 0; i < patina::P_COUNT; ++i) {
+    for (uint32_t i = 0; i < patina::P_COUNT; ++i) {
       vals[i] = patina::kParamSpecs[i].def;
     }
     vals[patina::P_MB] = 1.0;

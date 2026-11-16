@@ -327,7 +327,7 @@ int Panel::displayModel(const Shared& shared) const {
                     static_cast<int>(Model::Count) - 1);
 }
 
-void Panel::layout(const Shared& shared, const PanelState& state) {
+void Panel::layout(const Shared& shared) {
   widgets_.clear();
   const bool mb = shared.get(P_MB) > 0.5;
   const int sel = selectedBand(shared);
@@ -517,11 +517,10 @@ void Panel::layout(const Shared& shared, const PanelState& state) {
     c.h = 24;
     widgets_.push_back(c);
   }
-  (void)state;
 }
 
 void Panel::draw(cairo_t* cr, Shared& shared, const PanelState& state) {
-  layout(shared, state);
+  layout(shared);
   const int model = displayModel(shared);
   cairo_save(cr);
   cairo_set_source_rgb(cr, 0.06, 0.06, 0.065);
@@ -707,7 +706,6 @@ void Panel::drawDisplay(cairo_t* cr, const Shared& shared,
          skin.meterScale.g, skin.meterScale.b);
     text(cr, "IN", fx + fw - 8, fy + fh - 8, 10, 2, skin.meterScale.r,
          skin.meterScale.g, skin.meterScale.b);
-    (void)state;
   } else {
     // Scope: the shaped sine against the input.
     const double x0 = fx + 10, x1 = fx + fw - 10;
@@ -1023,7 +1021,6 @@ void Panel::drawLevelMeter(cairo_t* cr, double x, double y, double w, double h,
     setRgb(cr, colour, 0.85);
     cairo_rectangle(cr, x + 4, by + bh - fill, w - 8, fill);
     cairo_fill(cr);
-    (void)ch;
   }
   const char* labels[] = {"0", "-6", "-12", "-24", "-36", "-48", "-60"};
   const double values[] = {0, -6, -12, -24, -36, -48, -60};
@@ -1229,9 +1226,9 @@ void Panel::drawKnob(cairo_t* cr, const Widget& w, double value,
   }
 
   const ParamSpec& spec = kParamSpecs[w.param];
-  const double vmax = w.steps > 1 ? w.steps - 1 : spec.max;
-  const double span = vmax - spec.min;
-  const double frac = span > 0.0 ? (std::min(value, vmax) - spec.min) / span : 0.0;
+  const double span = spec.max - spec.min;
+  const double frac =
+      span > 0.0 ? (std::min(value, spec.max) - spec.min) / span : 0.0;
   const double a = knobAngle(clamp01(frac));
   cairo_set_line_width(cr, 2.0);
   setRgb(cr, skin.knobIndicator);
@@ -1263,9 +1260,6 @@ void Panel::tick(const Shared& shared, PanelState& state) const {
   state.inLevelR = shared.inPeakR.load();
   state.outLevelL = shared.outPeakL.load();
   state.outLevelR = shared.outPeakR.load();
-  state.inLevel = std::max(state.inLevelL, state.inLevelR);
-  state.outLevel = std::max(state.outLevelL, state.outLevelR);
-  state.outPeakHold = std::max(state.outPeakHold - 0.2f, state.outLevel);
   for (int b = 0; b < kBandCount; ++b) {
     const float target = shared.bandLevel[b].load();
     state.bandLevel[b] += (target - state.bandLevel[b]) * 0.35f;
@@ -1288,26 +1282,15 @@ bool Panel::hitWidget(const Widget& w, double x, double y) const {
   }
 }
 
-double Panel::knobValue(const Shared& shared, const Widget& w) const {
-  return shared.get(w.param);
-}
-
-bool Panel::isLit(const Shared& shared, const Widget& w) const {
-  return std::fabs(shared.get(w.param) - w.value) < 1e-3;
-}
-
-bool Panel::pointerDown(Shared& shared, PanelState& state, double x, double y,
-                        bool fine) {
+bool Panel::pointerDown(Shared& shared, PanelState& state, double x, double y) {
   if (handlePresetClick(shared, state, x, y)) return true;
   for (const Widget& w : widgets_) {
     if (!hitWidget(w, x, y)) continue;
     switch (w.kind) {
       case Kind::Knob:
         dragParam_ = static_cast<int>(w.param);
-        dragSteps_ = w.steps;
         dragStartY_ = y;
         dragStartValue_ = shared.get(w.param);
-        (void)fine;
         return false;
       case Kind::Power:
         shared.set(P_ENABLED, shared.get(P_ENABLED) > 0.5 ? 0.0 : 1.0);
@@ -1350,7 +1333,6 @@ bool Panel::pointerDown(Shared& shared, PanelState& state, double x, double y,
       case Kind::Crossover:
         dragParam_ = static_cast<int>(w.param);
         dragCrossover_ = true;
-        dragStartX_ = x;
         dragStartValue_ = shared.get(w.param);
         return true;
       case Kind::Cycle: {
@@ -1600,30 +1582,5 @@ bool Panel::handlePresetClick(Shared& shared, PanelState& state, double x,
   return true;
 }
 
-std::vector<Panel::WidgetRect> Panel::widgetRects() const {
-  std::vector<WidgetRect> out;
-  out.reserve(widgets_.size());
-  for (const Widget& w : widgets_) {
-    WidgetRect r;
-    r.param = w.param;
-    r.label = w.label;
-    r.knob = w.kind == Kind::Knob;
-    r.toggle = w.kind == Kind::Power;
-    r.r = w.r;
-    if (w.kind == Kind::Knob || w.kind == Kind::Power) {
-      r.x = w.x - w.r;
-      r.y = w.y - w.r;
-      r.w = w.r * 2;
-      r.h = w.r * 2;
-    } else {
-      r.x = w.x;
-      r.y = w.y;
-      r.w = w.w;
-      r.h = w.h;
-    }
-    out.push_back(r);
-  }
-  return out;
-}
 
 } // namespace patina

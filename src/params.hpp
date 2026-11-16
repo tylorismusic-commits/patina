@@ -99,8 +99,6 @@ struct ParamSpec {
   double def;
   bool stepped;
   bool hidden;
-  bool toggled;
-  const char* unit;
   Labels labels;
 };
 
@@ -114,58 +112,45 @@ inline constexpr const char* kBandCountLabels[] = {"2 Bands", "3 Bands",
                                                    "4 Bands"};
 
 #define PATINA_BAND_SPECS(prefix, module)                                      \
-  {prefix "_model", "Model", module, 0.0, 4.0, 0.0, true, false, false,       \
-   nullptr, labels(kModelLabels)},                                            \
-      {prefix "_input", "Input", module, 0.0, 1.0, 0.5, false, false, false,  \
-       "dB", {}},                                                             \
-      {prefix "_drive", "Drive", module, 0.0, 1.0, 0.45, false, false, false, \
-       nullptr, {}},                                                          \
+  {prefix "_model", "Model", module, 0.0, 4.0, 0.0, true, false,              \
+   labels(kModelLabels)},                                                     \
+      {prefix "_input", "Input", module, 0.0, 1.0, 0.5, false, false, {}},    \
+      {prefix "_drive", "Drive", module, 0.0, 1.0, 0.45, false, false, {}},   \
       {prefix "_character", "Character", module, 0.0, 1.0, 0.5, false, false, \
-       false, nullptr, {}},                                                   \
-      {prefix "_tone", "Tone", module, 0.0, 1.0, 0.5, false, false, false,    \
-       nullptr, {}},                                                          \
-      {prefix "_mix", "Mix", module, 0.0, 1.0, 1.0, false, false, false,      \
-       nullptr, {}},                                                          \
-      {prefix "_level", "Level", module, 0.0, 1.0, 0.5, false, false, false,  \
-       "dB", {}},                                                             \
-      {prefix "_on", "On", module, 0.0, 1.0, 1.0, true, false, true, nullptr, \
-       {}}
+       {}},                                                                   \
+      {prefix "_tone", "Tone", module, 0.0, 1.0, 0.5, false, false, {}},      \
+      {prefix "_mix", "Mix", module, 0.0, 1.0, 1.0, false, false, {}},        \
+      {prefix "_level", "Level", module, 0.0, 1.0, 0.5, false, false, {}},    \
+      {prefix "_on", "On", module, 0.0, 1.0, 1.0, true, false, {}}
 
 inline constexpr ParamSpec kParamSpecs[P_COUNT] = {
-    {"model", "Model", "Saturation", 0.0, 4.0, 0.0, true, false, false, nullptr,
+    {"model", "Model", "Saturation", 0.0, 4.0, 0.0, true, false,
      labels(kModelLabels)},
-    {"power", "Power", "Saturation", 0.0, 1.0, 1.0, true, false, true, nullptr,
-     {}},
-    {"drive", "Drive", "Saturation", 0.0, 1.0, 0.45, false, false, false,
-     nullptr, {}},
-    {"character", "Character", "Saturation", 0.0, 1.0, 0.5, false, false, false,
-     nullptr, {}},
-    {"tone", "Tone", "Saturation", 0.0, 1.0, 0.5, false, false, false, nullptr,
-     {}},
-    {"mix", "Mix", "Output", 0.0, 1.0, 1.0, false, false, false, nullptr, {}},
-    {"output", "Output", "Output", 0.0, 1.0, 0.5, false, false, false, nullptr,
-     {}},
-    {"auto_gain", "Auto Gain", "Output", 0.0, 1.0, 0.0, true, false, true,
-     nullptr, {}},
-    {"meter", "Display", "Display", 0.0, 3.0, 0.0, true, true, false, nullptr,
+    {"power", "Power", "Saturation", 0.0, 1.0, 1.0, true, false, {}},
+    {"drive", "Drive", "Saturation", 0.0, 1.0, 0.45, false, false, {}},
+    {"character", "Character", "Saturation", 0.0, 1.0, 0.5, false, false, {}},
+    {"tone", "Tone", "Saturation", 0.0, 1.0, 0.5, false, false, {}},
+    {"mix", "Mix", "Output", 0.0, 1.0, 1.0, false, false, {}},
+    {"output", "Output", "Output", 0.0, 1.0, 0.5, false, false, {}},
+    {"auto_gain", "Auto Gain", "Output", 0.0, 1.0, 0.0, true, false, {}},
+    {"meter", "Display", "Display", 0.0, 3.0, 0.0, true, true,
      labels(kMeterLabels)},
     {"oversample", "Oversampling", "Oversampling", 0.0, 2.0, 0.0, true, false,
-     false, nullptr, labels(kOversampleLabels)},
-    {"multiband", "Multiband", "Mode", 0.0, 1.0, 0.0, true, false, true, nullptr,
-     {}},
+     labels(kOversampleLabels)},
+    {"multiband", "Multiband", "Mode", 0.0, 1.0, 0.0, true, false, {}},
     {"xover_low", "Low Xover", "Multiband", 40.0, 800.0, 120.0, false, false,
-     false, "Hz", {}},
+     {}},
     {"xover_high", "High Xover", "Multiband", 200.0, 6000.0, 900.0, false,
-     false, false, "Hz", {}},
+     false, {}},
     {"xover_air", "Air Xover", "Multiband", 800.0, 16000.0, 5000.0, false,
-     false, false, "Hz", {}},
-    {"band", "Band", "Multiband", 0.0, 3.0, 1.0, true, true, false, nullptr,
+     false, {}},
+    {"band", "Band", "Multiband", 0.0, 3.0, 1.0, true, true,
      labels(kBandLabels)},
     PATINA_BAND_SPECS("band0", "Low Band"),
     PATINA_BAND_SPECS("band1", "Lo-Mid Band"),
     PATINA_BAND_SPECS("band2", "Hi-Mid Band"),
     PATINA_BAND_SPECS("band3", "High Band"),
-    {"bands", "Bands", "Multiband", 2.0, 4.0, 4.0, true, false, false, nullptr,
+    {"bands", "Bands", "Multiband", 2.0, 4.0, 4.0, true, false,
      labels(kBandCountLabels)},
 };
 
@@ -330,11 +315,6 @@ inline Controls controlsFrom(const Shared& s) noexcept {
   c.enabled = s.get(P_ENABLED) > 0.5;
   c.multiband = s.get(P_MB) > 0.5;
   c.bandCount = bandCount(s);
-  c.selectedBand =
-      std::min(std::max(static_cast<int>(s.get(P_BAND) + 0.5), 0), 3);
-  if (activeBandIndex(c.bandCount, c.selectedBand) < 0) {
-    c.selectedBand = activeBandSlot(c.bandCount, 0);
-  }
   c.soloBand = s.soloBand.load(std::memory_order_relaxed);
   if (c.soloBand >= 0 && activeBandIndex(c.bandCount, c.soloBand) < 0) {
     c.soloBand = -1;
