@@ -169,6 +169,50 @@ int main(int argc, char** argv) {
     std::printf("wrote %s\n", path.c_str());
   }
 
+  // Two- and three-band modes.
+  for (int count = 2; count <= 3; ++count) {
+    Shared shared;
+    shared.set(P_MODEL, 0);
+    enterMultiband(shared);
+    shared.set(P_BANDS, count);
+    shared.set(P_BAND, count == 2 ? 0 : 1);
+    shared.set(P_XOVER1, 120.0);
+    shared.set(P_XOVER2, 900.0);
+    shared.set(P_XOVER3, 5000.0);
+    shared.set(P_METER, 0);
+    const int models[4] = {4, 0, 2, 1};
+    const double drives[4] = {0.58, 0.44, 0.38, 0.32};
+    const double tones[4] = {0.36, 0.55, 0.58, 0.66};
+    for (int b = 0; b < kBandCount; ++b) {
+      shared.set(bandParam(b, BF_MODEL), models[b]);
+      shared.set(bandParam(b, BF_DRIVE), drives[b]);
+      shared.set(bandParam(b, BF_TONE), tones[b]);
+      shared.set(bandParam(b, BF_CHARACTER), 0.5);
+      shared.set(bandParam(b, BF_MIX), 1.0);
+      shared.set(bandParam(b, BF_LEVEL), 0.5);
+    }
+    fillSpectrum(shared);
+    shared.bandLevel[0].store(-7.0f);
+    shared.bandLevel[1].store(-12.0f);
+    shared.bandLevel[2].store(-16.0f);
+    shared.bandLevel[3].store(-22.0f);
+    PanelState state;
+    for (int i = 0; i < 20; ++i) panel.tick(shared, state);
+    cairo_surface_t* surface =
+        cairo_image_surface_create(CAIRO_FORMAT_ARGB32, kPanelWidth, kPanelHeight);
+    cairo_t* cr = cairo_create(surface);
+    panel.draw(cr, shared, state);
+    cairo_destroy(cr);
+    const std::string path = outDir + "/patina-mb-" + std::to_string(count) +
+                             "band.png";
+    if (cairo_surface_write_to_png(surface, path.c_str()) != CAIRO_STATUS_SUCCESS) {
+      std::fprintf(stderr, "could not write %s\n", path.c_str());
+      return 1;
+    }
+    cairo_surface_destroy(surface);
+    std::printf("wrote %s\n", path.c_str());
+  }
+
   // Scope view for the selected mid band.
   {
     Shared shared;

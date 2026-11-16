@@ -150,9 +150,17 @@ Rgb bandColour(int band) {
   }
 }
 
-const char* bandName(int band) {
-  static const char* const kNames[4] = {"LOW", "LO-MID", "HI-MID", "HIGH"};
-  return kNames[std::clamp(band, 0, 3)];
+const char* bandName(int count, int position) {
+  static const char* const kTwo[2] = {"LOW", "HIGH"};
+  static const char* const kThree[3] = {"LOW", "MID", "HIGH"};
+  static const char* const kFour[4] = {"LOW", "LO-MID", "HI-MID", "HIGH"};
+  if (count <= 2) {
+    return kTwo[std::clamp(position, 0, 1)];
+  }
+  if (count == 3) {
+    return kThree[std::clamp(position, 0, 2)];
+  }
+  return kFour[std::clamp(position, 0, 3)];
 }
 
 double freqToX(double freq, double x, double w) {
@@ -300,8 +308,12 @@ void Panel::text(cairo_t* cr, const char* s, double x, double y, double size,
 }
 
 int Panel::selectedBand(const Shared& shared) const {
-  return std::clamp(static_cast<int>(shared.get(P_BAND) + 0.5), 0,
-                    kBandCount - 1);
+  const int count = bandCount(shared);
+  int slot = std::clamp(static_cast<int>(shared.get(P_BAND) + 0.5), 0, 3);
+  if (activeBandIndex(count, slot) < 0) {
+    slot = activeBandSlot(count, 0);
+  }
+  return slot;
 }
 
 int Panel::displayModel(const Shared& shared) const {
@@ -385,23 +397,27 @@ void Panel::layout(const Shared& shared, const PanelState& state) {
 
   if (mb) {
     const double rowY = 340.0;
-    for (int i = 0; i < kBandCount; ++i) {
-      const double x = 176.0 + i * 136.0;
+    const int count = bandCount(shared);
+    const double rowX = count <= 2 ? 304.0 : (count == 3 ? 232.0 : 176.0);
+    const double rowStep = count <= 2 ? 200.0 : (count == 3 ? 160.0 : 136.0);
+    for (int index = 0; index < count; ++index) {
+      const int slot = activeBandSlot(count, index);
+      const double x = rowX + index * rowStep;
       Widget t{};
       t.kind = Kind::BandTab;
       t.param = P_BAND;
-      t.value = i;
+      t.value = slot;
       t.x = x;
       t.y = rowY;
       t.w = 80;
       t.h = 28;
-      t.label = kBandLabels[i];
+      t.label = bandLabelForCount(count, index);
       widgets_.push_back(t);
 
       Widget m{};
       m.kind = Kind::BandToggle;
-      m.param = bandParam(i, BF_ON);
-      m.value = i;
+      m.param = bandParam(slot, BF_ON);
+      m.value = slot;
       m.x = x + 84;
       m.y = rowY;
       m.w = 22;
@@ -411,7 +427,7 @@ void Panel::layout(const Shared& shared, const PanelState& state) {
 
       Widget solo{};
       solo.kind = Kind::BandSolo;
-      solo.value = i;
+      solo.value = slot;
       solo.x = x + 110;
       solo.y = rowY;
       solo.w = 22;
@@ -420,13 +436,22 @@ void Panel::layout(const Shared& shared, const PanelState& state) {
       widgets_.push_back(solo);
     }
 
-    const uint32_t kXovers[3] = {P_XOVER1, P_XOVER2, P_XOVER3};
-    for (int i = 0; i < 3; ++i) {
-      const double cx = freqToX(static_cast<double>(shared.get(kXovers[i])),
+    uint32_t xovers[3] = {P_XOVER1, P_XOVER2, P_XOVER3};
+    int xoverCount = 3;
+    if (count <= 2) {
+      xovers[0] = P_XOVER2;
+      xoverCount = 1;
+    } else if (count == 3) {
+      xovers[0] = P_XOVER1;
+      xovers[1] = P_XOVER3;
+      xoverCount = 2;
+    }
+    for (int i = 0; i < xoverCount; ++i) {
+      const double cx = freqToX(static_cast<double>(shared.get(xovers[i])),
                                 displayX_, displayW_);
       Widget xw{};
       xw.kind = Kind::Crossover;
-      xw.param = kXovers[i];
+      xw.param = xovers[i];
       xw.value = i;
       xw.x = cx - 10.0;
       xw.y = 172.0 + 160.0 - 24.0;
@@ -434,6 +459,15 @@ void Panel::layout(const Shared& shared, const PanelState& state) {
       xw.h = 24.0;
       widgets_.push_back(xw);
     }
+
+    Widget bc{};
+    bc.kind = Kind::Cycle;
+    bc.param = P_BANDS;
+    bc.x = 730.0;
+    bc.y = 340;
+    bc.w = 96;
+    bc.h = 28;
+    widgets_.push_back(bc);
 
     knob(bandParam(sel, BF_INPUT), 230, 470, 26, "INPUT", sc(kScaleTrim));
     knob(bandParam(sel, BF_DRIVE), 355, 470, 28, "DRIVE", sc(kScaleDrive));
@@ -507,8 +541,9 @@ void Panel::draw(cairo_t* cr, Shared& shared, const PanelState& state) {
   if (shared.get(P_MB) > 0.5) {
     const int sel = selectedBand(shared);
     char caption[128];
+    const int count = bandCount(shared);
     std::snprintf(caption, sizeof(caption), "Multiband  -  %s selected",
-                  bandName(sel));
+                  bandName(count, activeBandIndex(count, sel)));
     text(cr, caption, 520, 622, 13, 1, 0.80, 0.82, 0.84);
   } else {
     text(cr, skinFor(model).caption, 520, 622, 13, 1, 0.80, 0.82, 0.84);
@@ -773,11 +808,25 @@ void Panel::drawMultibandDisplay(cairo_t* cr, const Shared& shared,
                                  double fy, double fw, double fh) const {
   const Skin skin = skinFor(model);
   const int sel = selectedBand(shared);
+  const int count = bandCount(shared);
   const int mode = std::clamp(static_cast<int>(shared.get(P_METER) + 0.5), 0, 3);
   const double x1 = freqToX(shared.get(P_XOVER1), fx, fw);
   const double x2 = freqToX(shared.get(P_XOVER2), fx, fw);
   const double x3 = freqToX(shared.get(P_XOVER3), fx, fw);
-  const double edges[5] = {fx, x1, x2, x3, fx + fw};
+  double edges[5] = {fx, fx + fw, fx + fw, fx + fw, fx + fw};
+  if (count <= 2) {
+    edges[1] = x2;
+    edges[2] = fx + fw;
+  } else if (count == 3) {
+    edges[1] = x1;
+    edges[2] = x3;
+    edges[3] = fx + fw;
+  } else {
+    edges[1] = x1;
+    edges[2] = x2;
+    edges[3] = x3;
+    edges[4] = fx + fw;
+  }
 
   // Frequency grid.
   setRgb(cr, skin.meterScale, 0.16);
@@ -791,18 +840,19 @@ void Panel::drawMultibandDisplay(cairo_t* cr, const Shared& shared,
   }
 
   // Band beds and labels.
-  for (int b = 0; b < kBandCount; ++b) {
-    const double x0 = edges[b];
-    const double xb = edges[b + 1];
+  for (int index = 0; index < count; ++index) {
+    const int slot = activeBandSlot(count, index);
+    const double x0 = edges[index];
+    const double xb = edges[index + 1];
     if (xb - x0 < 2.0) {
       continue;
     }
-    const Rgb col = bandColour(b);
-    const double bedAlpha = mode == 2 ? 0.035 : (b == sel ? 0.20 : 0.075);
+    const Rgb col = bandColour(slot);
+    const double bedAlpha = mode == 2 ? 0.035 : (slot == sel ? 0.20 : 0.075);
     setRgb(cr, col, bedAlpha);
     cairo_rectangle(cr, x0, fy, xb - x0, fh);
     cairo_fill(cr);
-    if (b == sel) {
+    if (slot == sel) {
       setRgb(cr, col, 0.72);
       cairo_set_line_width(cr, 1.4);
       cairo_rectangle(cr, x0 + 0.5, fy + 0.5, xb - x0 - 1.0, fh - 1.0);
@@ -817,14 +867,16 @@ void Panel::drawMultibandDisplay(cairo_t* cr, const Shared& shared,
   }
 
   // Band names sit above the spectrum so they stay readable.
-  for (int b = 0; b < kBandCount; ++b) {
-    const double x0 = edges[b];
-    const double xb = edges[b + 1];
+  for (int index = 0; index < count; ++index) {
+    const int slot = activeBandSlot(count, index);
+    const double x0 = edges[index];
+    const double xb = edges[index + 1];
     if (xb - x0 > 36.0) {
-      const Rgb col = bandColour(b);
-      text(cr, bandName(b), x0 + 6, fy + 17, 10.0, 0, col.r, col.g, col.b);
+      const Rgb col = bandColour(slot);
+      text(cr, bandName(count, index), x0 + 6, fy + 17, 10.0, 0, col.r,
+           col.g, col.b);
       const int bandModel = std::clamp(
-          static_cast<int>(shared.get(bandParam(b, BF_MODEL)) + 0.5), 0, 4);
+          static_cast<int>(shared.get(bandParam(slot, BF_MODEL)) + 0.5), 0, 4);
       text(cr, modelShort(bandModel), x0 + 6, fy + 29, 8.5, 0,
            skin.legendDim.r, skin.legendDim.g, skin.legendDim.b);
     }
@@ -832,9 +884,10 @@ void Panel::drawMultibandDisplay(cairo_t* cr, const Shared& shared,
 
   // A slim level meter at the left edge of each band.
   if (mode != 3) {
-    for (int b = 0; b < kBandCount; ++b) {
-      const double x0 = edges[b];
-      const double xb = edges[b + 1];
+    for (int index = 0; index < count; ++index) {
+      const int slot = activeBandSlot(count, index);
+      const double x0 = edges[index];
+      const double xb = edges[index + 1];
       if (xb - x0 < 14.0) {
         continue;
       }
@@ -843,22 +896,31 @@ void Panel::drawMultibandDisplay(cairo_t* cr, const Shared& shared,
       roundRect(cr, x0 + 4, topLimit, 5.0, bottom - topLimit, 2.0);
       setRgb(cr, mix(skin.meterFace, {0, 0, 0}, 0.5), 0.55);
       cairo_fill(cr);
-      const double level = clamp01((state.bandLevel[b] + 60.0) / 60.0);
+      const double level = clamp01((state.bandLevel[slot] + 60.0) / 60.0);
       if (level > 0.01) {
         const double top = bottom - level * (bottom - topLimit);
         roundRect(cr, x0 + 4, top, 5.0, bottom - top, 2.0);
-        setRgb(cr, bandColour(b), b == sel ? 0.90 : 0.70);
+        setRgb(cr, bandColour(slot), slot == sel ? 0.90 : 0.70);
         cairo_fill(cr);
       }
     }
   }
 
-  // Crossover handles.
-  const double splits[3] = {shared.get(P_XOVER1), shared.get(P_XOVER2),
-                            shared.get(P_XOVER3)};
-  const double xs[3] = {x1, x2, x3};
-  for (int i = 0; i < 3; ++i) {
-    const double x = xs[i];
+  // Crossover handles.  Two bands use the 900 Hz split; three bands use the
+  // 120 Hz and 5 kHz splits; four bands show all three.
+  uint32_t xparams[3] = {P_XOVER1, P_XOVER2, P_XOVER3};
+  int xoverCount = 3;
+  if (count <= 2) {
+    xparams[0] = P_XOVER2;
+    xoverCount = 1;
+  } else if (count == 3) {
+    xparams[0] = P_XOVER1;
+    xparams[1] = P_XOVER3;
+    xoverCount = 2;
+  }
+  for (int i = 0; i < xoverCount; ++i) {
+    const double hz = shared.get(xparams[i]);
+    const double x = freqToX(hz, fx, fw);
     setRgb(cr, skin.meterNeedle, 0.80);
     cairo_set_line_width(cr, 1.2);
     cairo_move_to(cr, x, fy + 6);
@@ -868,15 +930,16 @@ void Panel::drawMultibandDisplay(cairo_t* cr, const Shared& shared,
     setRgb(cr, mix(skin.meterNeedle, {0, 0, 0}, 0.15));
     cairo_fill(cr);
     char label[32];
-    formatHz(label, sizeof(label), splits[i]);
+    formatHz(label, sizeof(label), hz);
     text(cr, label, x, fy + fh - 23, 9.0, 1, skin.legend.r, skin.legend.g,
          skin.legend.b);
   }
 
   // The selected band's scope, drawn inside its region.
   if (mode == 1) {
-    const double x0 = edges[sel] + 8.0;
-    const double xb = edges[sel + 1] - 8.0;
+    const int selIndex = std::max(0, activeBandIndex(count, sel));
+    const double x0 = edges[selIndex] + 8.0;
+    const double xb = edges[selIndex + 1] - 8.0;
     if (xb > x0 + 10.0) {
       const double mid = fy + fh * 0.56;
       const double amp = fh * 0.26;
@@ -1027,12 +1090,22 @@ void Panel::drawWidget(cairo_t* cr, const Widget& w, const Shared& shared,
       drawPill(cr, w, shared.get(w.param) > 0.5, model);
       break;
     case Kind::Cycle: {
-      static const char* const kNames[3] = {"OS OFF", "OS 2X", "OS 4X"};
-      const int v =
-          std::clamp(static_cast<int>(shared.get(w.param) + 0.5), 0, 2);
-      Widget copy = w;
-      copy.label = kNames[v];
-      drawPill(cr, copy, v != 0, model);
+      if (w.param == P_BANDS) {
+        const int count =
+            std::clamp(static_cast<int>(shared.get(P_BANDS) + 0.5), 2, 4);
+        char label[16];
+        std::snprintf(label, sizeof(label), "%d BAND", count);
+        Widget copy = w;
+        copy.label = label;
+        drawPill(cr, copy, true, model);
+      } else {
+        static const char* const kNames[3] = {"OS OFF", "OS 2X", "OS 4X"};
+        const int v =
+            std::clamp(static_cast<int>(shared.get(w.param) + 0.5), 0, 2);
+        Widget copy = w;
+        copy.label = kNames[v];
+        drawPill(cr, copy, v != 0, model);
+      }
       break;
     }
     case Kind::BandTab: {
@@ -1281,8 +1354,24 @@ bool Panel::pointerDown(Shared& shared, PanelState& state, double x, double y,
         dragStartValue_ = shared.get(w.param);
         return true;
       case Kind::Cycle: {
-        const int v = static_cast<int>(shared.get(w.param) + 0.5);
-        shared.set(w.param, static_cast<double>((v + 1) % 3));
+        if (w.param == P_BANDS) {
+          const int count =
+              std::clamp(static_cast<int>(shared.get(P_BANDS) + 0.5), 2, 4);
+          const int next = count >= 4 ? 2 : count + 1;
+          shared.set(P_BANDS, next);
+          const int slot =
+              std::clamp(static_cast<int>(shared.get(P_BAND) + 0.5), 0, 3);
+          if (activeBandIndex(next, slot) < 0) {
+            shared.set(P_BAND, activeBandSlot(next, next >= 3 ? 1 : 0));
+          }
+          const int solo = shared.soloBand.load(std::memory_order_relaxed);
+          if (solo >= 0 && activeBandIndex(next, solo) < 0) {
+            shared.soloBand.store(-1, std::memory_order_relaxed);
+          }
+        } else {
+          const int v = static_cast<int>(shared.get(w.param) + 0.5);
+          shared.set(w.param, static_cast<double>((v + 1) % 3));
+        }
         state.presetDirty = true;
         return true;
       }

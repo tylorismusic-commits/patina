@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
 
   check(params && params->count(plugin) == patina::P_COUNT,
         "parameter count matches the table");
-  check(params && params->count(plugin) == 47, "forty-seven parameters");
+  check(params && params->count(plugin) == 48, "forty-eight parameters");
   check(latency != nullptr, "latency extension present");
   check(latency && latency->get(plugin) == 0,
         "latency is zero with oversampling off");
@@ -252,6 +252,7 @@ int main(int argc, char** argv) {
   double value = 0.0;
   {
     events.inputs.push_back(paramEvent(patina::P_MB, 1.0));
+    events.inputs.push_back(paramEvent(patina::P_BANDS, 4.0));
     events.inputs.push_back(paramEvent(patina::P_XOVER1, 120.0));
     events.inputs.push_back(paramEvent(patina::P_XOVER2, 900.0));
     events.inputs.push_back(paramEvent(patina::P_XOVER3, 5000.0));
@@ -414,6 +415,8 @@ int main(int argc, char** argv) {
     check(std::strcmp(buf, "5.0 kHz") == 0, "air crossover reads as kHz");
     params->value_to_text(plugin, patina::P_BAND, 3.0, buf, sizeof(buf));
     check(std::strcmp(buf, "High") == 0, "band selection reads as a name");
+    params->value_to_text(plugin, patina::P_BANDS, 3.0, buf, sizeof(buf));
+    check(std::strcmp(buf, "3 Bands") == 0, "band count reads as a mode");
     params->value_to_text(plugin, patina::bandParam(1, patina::BF_LEVEL), 0.0,
                           buf, sizeof(buf));
     check(std::strcmp(buf, "Off") == 0, "band level reaches off");
@@ -633,6 +636,14 @@ int main(int argc, char** argv) {
       pumpAudio(24);
       std::this_thread::sleep_for(std::chrono::milliseconds(350));
       capture("/tmp/opencode/patina-editor-spectrum.ppm");
+
+      // The band-count pill cycles 4 -> 2 -> 3 -> 4.
+      click(778, 354);
+      check(paramValue(patina::P_BANDS) == 2.0, "band count cycles to two");
+      click(778, 354);
+      check(paramValue(patina::P_BANDS) == 3.0, "band count cycles to three");
+      click(778, 354);
+      check(paramValue(patina::P_BANDS) == 4.0, "band count cycles back to four");
 
       gui->hide(plugin);
       gui->destroy(plugin);

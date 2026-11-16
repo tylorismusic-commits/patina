@@ -1,8 +1,8 @@
 # Patina
 
 A five-model saturation plugin for Linux, in the same visual language as Comp
-Suite. Patina runs as a quick single-band saturator or as a four-band
-multiband colour box with a different model per band. GPL-3.0-or-later.
+Suite. Patina runs as a quick single-band saturator or as a two-, three- or
+four-band multiband colour box with a different model per band. GPL-3.0-or-later.
 
 The CLAP bundle is built and installable; LV2 wiring is next.
 
@@ -24,16 +24,20 @@ curve), **Scope** (input vs shaped sine) and **Off**.
 
 ### Multiband
 
-Switch on **Multiband** for four bands (Low, Lo-Mid, Hi-Mid, High) with
-Linkwitz-Riley 4th-order crossovers (defaults 120 Hz, 900 Hz and 5 kHz,
-draggable in the display):
+Switch on **Multiband** for two, three or four bands with Linkwitz-Riley
+4th-order crossovers (defaults 120 Hz, 900 Hz and 5 kHz, draggable in the
+display):
 
+- A band-count pill switches between **2, 3 and 4 bands**. Two bands use the
+  900 Hz split and merge the middle regions into Low/High; three bands use
+  120 Hz and 5 kHz and merge the two middle regions into Mid; four bands use
+  all three crossovers.
 - Every band has its own **model**, **input**, **drive**, **character**,
   **tone**, **mix**, **level**, mute and solo.
 - **Level** runs from silence (0) through 0 dB to +12 dB, so a band can be
   faded fully out or pushed hard.
 - The model tabs and knobs edit the selected band; the band row switches
-  between the four bands.
+  between the active bands.
 - **Bands** shows the four regions, live band meters, crossover handles and
   the input FFT spectrum. **Scope** draws the selected band's shaped waveform.
   **Spec** shows the spectrum full-size. **Off** hides the overlays.
@@ -75,7 +79,8 @@ Render the panel previews:
 - [x] Panel in the Comp Suite visual language (shape/scope displays)
 - [x] Factory presets
 - [x] DSP tests
-- [x] Four-band multiband mode with per-band models and crossovers
+- [x] Two-, three- and four-band multiband modes with per-band models and
+  crossovers
 - [x] Real-time FFT spectrum display
 - [x] CLAP
 - [ ] LV2
@@ -83,10 +88,14 @@ Render the panel previews:
 
 The previews and the CLAP editor render from the same Panel class. Multiband
 previews are in `docs/patina-mb-low.png`, `patina-mb-lomid.png`,
-`patina-mb-himid.png`, `patina-mb-high.png`, `patina-mb-scope.png` and
-`patina-mb-spectrum.png`; the single-band spectrum is
-`docs/patina-spectrum.png`.
+`patina-mb-himid.png`, `patina-mb-high.png`, `patina-mb-2band.png`,
+`patina-mb-3band.png`, `patina-mb-scope.png` and `patina-mb-spectrum.png`;
+the single-band spectrum is `docs/patina-spectrum.png`.
 
 ## Licence
 
 GPL-3.0-or-later. See `THIRD_PARTY_NOTICES.md`.
+
+## Changelog
+
+See `CHANGELOG.md`.

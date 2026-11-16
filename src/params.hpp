@@ -59,6 +59,7 @@ enum ParamId : uint32_t {
   P_B3_MIX,
   P_B3_OUTPUT,
   P_B3_ON,
+  P_BANDS,
   P_COUNT
 };
 
@@ -109,6 +110,8 @@ inline constexpr const char* kMeterLabels[] = {"Shape", "Scope", "Spectrum",
                                               "Off"};
 inline constexpr const char* kOversampleLabels[] = {"Off", "2x", "4x"};
 inline constexpr const char* kBandLabels[] = {"Low", "Lo-Mid", "Hi-Mid", "High"};
+inline constexpr const char* kBandCountLabels[] = {"2 Bands", "3 Bands",
+                                                   "4 Bands"};
 
 #define PATINA_BAND_SPECS(prefix, module)                                      \
   {prefix "_model", "Model", module, 0.0, 4.0, 0.0, true, false, false,       \
@@ -162,13 +165,15 @@ inline constexpr ParamSpec kParamSpecs[P_COUNT] = {
     PATINA_BAND_SPECS("band1", "Lo-Mid Band"),
     PATINA_BAND_SPECS("band2", "Hi-Mid Band"),
     PATINA_BAND_SPECS("band3", "High Band"),
+    {"bands", "Bands", "Multiband", 2.0, 4.0, 4.0, true, false, false, nullptr,
+     labels(kBandCountLabels)},
 };
 
 #undef PATINA_BAND_SPECS
 
 static_assert(sizeof(kParamSpecs) / sizeof(kParamSpecs[0]) == P_COUNT,
               "kParamSpecs must cover every parameter id");
-static_assert(P_COUNT == 47, "parameter table and enum must stay in sync");
+static_assert(P_COUNT == 48, "parameter table and enum must stay in sync");
 
 class Shared {
 public:
@@ -253,6 +258,22 @@ private:
   std::atomic<bool> dirty_[P_COUNT];
 };
 
+inline int bandCount(const Shared& s) noexcept {
+  return std::min(std::max(static_cast<int>(s.get(P_BANDS) + 0.5), 2), 4);
+}
+
+inline const char* bandLabelForCount(int count, int band) noexcept {
+  static const char* const kTwo[] = {"Low", "High"};
+  static const char* const kThree[] = {"Low", "Mid", "High"};
+  if (count <= 2) {
+    return kTwo[std::min(std::max(band, 0), 1)];
+  }
+  if (count == 3) {
+    return kThree[std::min(std::max(band, 0), 2)];
+  }
+  return kBandLabels[std::min(std::max(band, 0), 3)];
+}
+
 inline BandControls bandFrom(const Shared& s, int band) noexcept {
   BandControls b;
   b.model = static_cast<int>(s.get(bandParam(band, BF_MODEL)) + 0.5);
@@ -270,10 +291,16 @@ inline Controls controlsFrom(const Shared& s) noexcept {
   Controls c;
   c.enabled = s.get(P_ENABLED) > 0.5;
   c.multiband = s.get(P_MB) > 0.5;
+  c.bandCount = bandCount(s);
   c.selectedBand =
-      std::min(std::max(static_cast<int>(s.get(P_BAND) + 0.5), 0),
-               kBandCount - 1);
+      std::min(std::max(static_cast<int>(s.get(P_BAND) + 0.5), 0), 3);
+  if (activeBandIndex(c.bandCount, c.selectedBand) < 0) {
+    c.selectedBand = activeBandSlot(c.bandCount, 0);
+  }
   c.soloBand = s.soloBand.load(std::memory_order_relaxed);
+  if (c.soloBand >= 0 && activeBandIndex(c.bandCount, c.soloBand) < 0) {
+    c.soloBand = -1;
+  }
   c.xover1 = static_cast<float>(s.get(P_XOVER1));
   c.xover2 = static_cast<float>(s.get(P_XOVER2));
   c.xover3 = static_cast<float>(s.get(P_XOVER3));
@@ -319,7 +346,8 @@ inline void enterMultiband(Shared& s) {
       s.set(bandParam(b, BF_ON), 1.0);
     }
   }
-  s.set(P_BAND, 1.0);
+  const int count = bandCount(s);
+  s.set(P_BAND, activeBandSlot(count, count >= 3 ? 1 : 0));
   s.set(P_MB, 1.0);
   s.soloBand.store(-1, std::memory_order_relaxed);
 }
@@ -327,9 +355,10 @@ inline void enterMultiband(Shared& s) {
 // Leaving multiband: the selected band becomes the single-band sound, so
 // toggling back and forth is an A/B.
 inline void leaveMultiband(Shared& s) {
-  const int b =
-      std::min(std::max(static_cast<int>(s.get(P_BAND) + 0.5), 0),
-               kBandCount - 1);
+  int b = std::min(std::max(static_cast<int>(s.get(P_BAND) + 0.5), 0), 3);
+  if (activeBandIndex(bandCount(s), b) < 0) {
+    b = activeBandSlot(bandCount(s), 0);
+  }
   s.set(P_MODEL, s.get(bandParam(b, BF_MODEL)));
   s.set(P_DRIVE, s.get(bandParam(b, BF_DRIVE)));
   s.set(P_CHARACTER, s.get(bandParam(b, BF_CHARACTER)));

@@ -398,8 +398,9 @@ bool paramsValue(const clap_plugin_t* p, clap_id id, double* value) {
   return true;
 }
 
-bool paramsValueToText(const clap_plugin_t*, clap_id id, double value,
+bool paramsValueToText(const clap_plugin_t* p, clap_id id, double value,
                        char* out, uint32_t size) {
+  const int count = bandCount(self(p)->shared);
   switch (id) {
     case P_MODEL:
       std::snprintf(
@@ -427,11 +428,21 @@ bool paramsValueToText(const clap_plugin_t*, clap_id id, double value,
       std::snprintf(out, size, value >= 1000.0 ? "%.1f kHz" : "%.0f Hz",
                     value >= 1000.0 ? value / 1000.0 : value);
       return true;
-    case P_BAND:
+    case P_BANDS:
       std::snprintf(
           out, size, "%s",
-          kBandLabels[std::clamp(static_cast<int>(value + 0.5), 0, 3)]);
+          kBandCountLabels[std::clamp(static_cast<int>(value + 0.5), 2, 4) -
+                           2]);
       return true;
+    case P_BAND: {
+      int index = activeBandIndex(
+          count, std::clamp(static_cast<int>(value + 0.5), 0, 3));
+      if (index < 0) {
+        index = 0;
+      }
+      std::snprintf(out, size, "%s", bandLabelForCount(count, index));
+      return true;
+    }
     case P_METER:
       std::snprintf(
           out, size, "%s",
@@ -646,7 +657,7 @@ const clap_plugin_params_t kParamsExt = {
 // --- State ------------------------------------------------------------------
 
 constexpr uint32_t kStateMagic = 0x50544E41u; // "PTNA"
-constexpr uint32_t kStateVersion = 2;
+constexpr uint32_t kStateVersion = 4;
 
 bool stateSave(const clap_plugin_t* p, const clap_ostream_t* stream) {
   Plugin* s = self(p);
@@ -674,7 +685,7 @@ bool stateLoad(const clap_plugin_t* p, const clap_istream_t* stream) {
 
   double scale = 0.0;
   if (header[0] == kStateMagic) {
-    if (header[1] != kStateVersion || header[2] > 64) {
+    if (header[1] < 2 || header[1] > kStateVersion || header[2] > 64) {
       return false;
     }
     double values[64] = {};
@@ -683,8 +694,22 @@ bool stateLoad(const clap_plugin_t* p, const clap_istream_t* stream) {
         static_cast<int64_t>(count * sizeof(double))) {
       return false;
     }
-    for (uint32_t i = 0; i < count && i < P_COUNT; ++i) {
-      s->shared.setFromHost(i, values[i]);
+    if (header[1] == 2 && count == 38) {
+      // Patina 0.2.0 had three bands and no Air crossover.  Its band base
+      // sat one id earlier; shift the old band block into the 4-band layout.
+      for (uint32_t i = 0; i < count; ++i) {
+        if (i < 13) {
+          s->shared.setFromHost(i, values[i]);
+        } else if (i == 13) {
+          s->shared.setFromHost(P_BAND, values[i]);
+        } else {
+          s->shared.setFromHost(i + 1, values[i]);
+        }
+      }
+    } else {
+      for (uint32_t i = 0; i < count && i < P_COUNT; ++i) {
+        s->shared.setFromHost(i, values[i]);
+      }
     }
   } else {
     // Patina 0.1.0 wrote ten doubles + scale with no header.  The two doubles

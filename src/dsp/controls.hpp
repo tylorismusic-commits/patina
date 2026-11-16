@@ -24,6 +24,28 @@ enum class Band : int {
 constexpr int kBandCount = static_cast<int>(Band::Count);
 constexpr int kSpectrumBins = 128;
 
+// Which per-band slot is used by each position in 2/3/4-band mode.  Two
+// bands keep the outer Low/High slots; three bands keep Low, Lo-Mid and High
+// and merge the two middle regions into the Mid band.
+constexpr int activeBandSlot(int count, int index) noexcept {
+  if (count <= 2) {
+    return index == 0 ? 0 : 3;
+  }
+  if (count == 3) {
+    return index == 0 ? 0 : (index == 1 ? 1 : 3);
+  }
+  return index < 0 ? 0 : (index > 3 ? 3 : index);
+}
+
+constexpr int activeBandIndex(int count, int slot) noexcept {
+  for (int i = 0; i < count; ++i) {
+    if (activeBandSlot(count, i) == slot) {
+      return i;
+    }
+  }
+  return -1;
+}
+
 struct BandControls {
   int model = 0;
   bool enabled = true;
@@ -38,6 +60,7 @@ struct BandControls {
 struct Controls {
   bool enabled = true;
   bool multiband = false;
+  int bandCount = 4;
   int selectedBand = 1;
   int soloBand = -1;
   float xover1 = 120.0f;  // Hz

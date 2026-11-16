@@ -32,6 +32,7 @@ Controls singleControls(int model, int mode) {
 Controls multiControls(int mode) {
   Controls c;
   c.multiband = true;
+  c.bandCount = 4;
   c.xover1 = 120.0f;
   c.xover2 = 800.0f;
   c.xover3 = 5000.0f;
@@ -124,6 +125,111 @@ int main() {
     const int expect = mode == 0 ? 0 : (mode == 1 ? 30 : 45);
     std::snprintf(label, sizeof(label), "multiband mode %d latency", mode);
     check(engine.latencySamples() == expect, label);
+  }
+
+  // 2-, 3- and 4-band modes all process with the same active-band mapping.
+  for (int count = 2; count <= 4; ++count) {
+    SaturationEngine engine;
+    engine.prepare(kSr);
+    Controls c = multiControls(0);
+    c.bandCount = count;
+    c.selectedBand = activeBandSlot(count, count >= 3 ? 1 : 0);
+    engine.setControls(c);
+    Meters meters;
+    std::vector<float> l(256), r(256);
+    bool finite = true;
+    double power = 0.0;
+    for (int b = 0; b < 120; ++b) {
+      for (int i = 0; i < 256; ++i) {
+        const float t = static_cast<float>(b * 256 + i) / kSr;
+        l[i] = r[i] = 0.25f * std::sin(2.0f * 3.14159265f * 220.0f * t);
+      }
+      engine.process(l.data(), r.data(), 256, meters);
+      if (b > 80) {
+        for (int i = 0; i < 256; ++i) {
+          if (!std::isfinite(l[i]) || !std::isfinite(r[i])) finite = false;
+          power += static_cast<double>(l[i]) * l[i];
+        }
+      }
+    }
+    char label[96];
+    std::snprintf(label, sizeof(label), "%d-band mode is finite and audible",
+                  count);
+    check(finite && std::sqrt(power / (39 * 256)) > 0.005, label);
+  }
+
+  // Switching oversampling must retune the crossovers in every band count.
+  // The coefficient cache is keyed by frequency, so a rate change has to
+  // invalidate it for the 2-, 3- and 4-band splits alike.
+  for (int count = 2; count <= 4; ++count) {
+    SaturationEngine engine;
+    engine.prepare(kSr);
+    Controls c = multiControls(0);
+    c.bandCount = count;
+    c.selectedBand = activeBandSlot(count, 0);
+    auto measure = [&]() {
+      Meters meters;
+      std::vector<float> l(256), r(256);
+      float low = -120.0f;
+      double power = 0.0;
+      for (int b = 0; b < 260; ++b) {
+        for (int i = 0; i < 256; ++i) {
+          const float t = static_cast<float>(b * 256 + i) / kSr;
+          l[i] = r[i] = 0.25f * std::sin(2.0f * 3.14159265f * 1000.0f * t);
+        }
+        engine.process(l.data(), r.data(), 256, meters);
+        if (b > 120) {
+          low = meters.bandLevel[0];
+          for (int i = 0; i < 256; ++i) {
+            power += static_cast<double>(l[i]) * l[i];
+          }
+        }
+      }
+      return std::make_pair(std::sqrt(power / (139.0 * 256.0)), low);
+    };
+    engine.setControls(c);
+    const auto reference = measure();
+    c.oversample = 2.0f;
+    engine.setControls(c);
+    measure();
+    c.oversample = 0.0f;
+    engine.setControls(c);
+    const auto returned = measure();
+    char label[128];
+    std::snprintf(label, sizeof(label),
+                  "%d-band oversampling round-trip keeps the level", count);
+    check(std::fabs(returned.first / reference.first - 1.0) < 0.05, label);
+    std::snprintf(label, sizeof(label),
+                  "%d-band oversampling round-trip retunes the crossover",
+                  count);
+    check(std::fabs(returned.second - reference.second) < 3.0f, label);
+  }
+
+  // A solo on an inactive slot must not mute the active bands.
+  {
+    SaturationEngine engine;
+    engine.prepare(kSr);
+    Controls c = multiControls(0);
+    c.bandCount = 3;
+    c.soloBand = 2;
+    engine.setControls(c);
+    Meters meters;
+    std::vector<float> l(256), r(256);
+    double power = 0.0;
+    for (int b = 0; b < 100; ++b) {
+      for (int i = 0; i < 256; ++i) {
+        const float t = static_cast<float>(b * 256 + i) / kSr;
+        l[i] = r[i] = 0.25f * std::sin(2.0f * 3.14159265f * 1000.0f * t);
+      }
+      engine.process(l.data(), r.data(), 256, meters);
+      if (b > 70) {
+        for (int i = 0; i < 256; ++i) {
+          power += static_cast<double>(l[i]) * l[i];
+        }
+      }
+    }
+    check(std::sqrt(power / (29 * 256)) > 0.01,
+          "solo on an inactive slot does not mute the band");
   }
 
   // Clean bands (mix = 0) must reconstruct the input magnitude.

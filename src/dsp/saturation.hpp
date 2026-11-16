@@ -249,6 +249,13 @@ public:
       configure(factor);
     }
     controls_ = c;
+    controls_.bandCount = std::min(std::max(c.bandCount, 2), 4);
+    controls_.selectedBand =
+        std::min(std::max(c.selectedBand, 0), controls_.bandCount - 1);
+    if (controls_.soloBand >= 0 &&
+        activeBandIndex(controls_.bandCount, controls_.soloBand) < 0) {
+      controls_.soloBand = -1;
+    }
     controls_.xover1 = std::min(std::max(c.xover1, 40.0f), 800.0f);
     controls_.xover2 = std::min(std::max(c.xover2, 200.0f), 6000.0f);
     controls_.xover3 = std::min(std::max(c.xover3, 1000.0f), 16000.0f);
@@ -309,7 +316,13 @@ public:
     for (BandSaturator& b : bands_) {
       b.reset();
     }
-    for (hdsp::FourBandCrossover& xo : xover_) {
+    for (hdsp::LinkwitzRiley4& xo : xover2_) {
+      xo.reset();
+    }
+    for (hdsp::ThreeBandCrossover& xo : xover3_) {
+      xo.reset();
+    }
+    for (hdsp::FourBandCrossover& xo : xover4_) {
       xo.reset();
     }
     spectrum_.reset();
@@ -344,7 +357,13 @@ private:
     for (BandSaturator& b : bands_) {
       b.prepare(osRate_);
     }
-    for (hdsp::FourBandCrossover& xo : xover_) {
+    for (hdsp::LinkwitzRiley4& xo : xover2_) {
+      xo.prepare(osRate_);
+    }
+    for (hdsp::ThreeBandCrossover& xo : xover3_) {
+      xo.prepare(osRate_);
+    }
+    for (hdsp::FourBandCrossover& xo : xover4_) {
       xo.prepare(osRate_);
     }
     spectrum_.prepare(baseRate_);
@@ -352,6 +371,12 @@ private:
     vuCoeff_ = hdsp::timeCoeff(300.0f, osRate_);
     autoPowerCoeff_ = hdsp::timeCoeff(120.0f, osRate_);
     autoDbCoeff_ = hdsp::timeCoeff(250.0f, osRate_);
+    // The coefficient cache is keyed by frequency only.  A rate change
+    // prepares the filters at a new sample rate, so force a recompute even
+    // when the crossover frequencies themselves did not move.
+    xover1Applied_ = -1.0f;
+    xover2Applied_ = -1.0f;
+    xover3Applied_ = -1.0f;
     xover1Cur_ = controls_.xover1;
     xover2Cur_ = controls_.xover2;
     xover3Cur_ = controls_.xover3;
@@ -382,7 +407,13 @@ private:
     xover1Applied_ = xover1Cur_;
     xover2Applied_ = xover2Cur_;
     xover3Applied_ = xover3Cur_;
-    for (hdsp::FourBandCrossover& xo : xover_) {
+    for (hdsp::LinkwitzRiley4& xo : xover2_) {
+      xo.setCrossover(xover2Cur_);
+    }
+    for (hdsp::ThreeBandCrossover& xo : xover3_) {
+      xo.setCrossovers(xover1Cur_, xover3Cur_);
+    }
+    for (hdsp::FourBandCrossover& xo : xover4_) {
       xo.setCrossovers(xover1Cur_, xover2Cur_, xover3Cur_);
     }
   }
@@ -405,15 +436,22 @@ private:
       float wetR = dryR;
 
       if (multiband) {
-        float b0L = 0.0f, b1L = 0.0f, b2L = 0.0f, b3L = 0.0f;
-        float b0R = 0.0f, b1R = 0.0f, b2R = 0.0f, b3R = 0.0f;
-        xover_[0].process(dryL, b0L, b1L, b2L, b3L);
-        xover_[1].process(dryR, b0R, b1R, b2R, b3R);
-        float bandL[kBandCount] = {b0L, b1L, b2L, b3L};
-        float bandR[kBandCount] = {b0R, b1R, b2R, b3R};
+        float bandL[kBandCount] = {};
+        float bandR[kBandCount] = {};
+        if (controls_.bandCount <= 2) {
+          xover2_[0].process(dryL, bandL[0], bandL[3]);
+          xover2_[1].process(dryR, bandR[0], bandR[3]);
+        } else if (controls_.bandCount == 3) {
+          xover3_[0].process(dryL, bandL[0], bandL[1], bandL[3]);
+          xover3_[1].process(dryR, bandR[0], bandR[1], bandR[3]);
+        } else {
+          xover4_[0].process(dryL, bandL[0], bandL[1], bandL[2], bandL[3]);
+          xover4_[1].process(dryR, bandR[0], bandR[1], bandR[2], bandR[3]);
+        }
         wetL = 0.0f;
         wetR = 0.0f;
-        for (int b = 0; b < kBandCount; ++b) {
+        for (int index = 0; index < controls_.bandCount; ++index) {
+          const int b = activeBandSlot(controls_.bandCount, index);
           bands_[b].process(bandL[b], bandR[b]);
           st.band[b] =
               std::max(st.band[b], std::max(std::fabs(bandL[b]),
@@ -469,7 +507,9 @@ private:
   Controls controls_;
   hdsp::Oversampler os_;
   BandSaturator bands_[kBandCount];
-  hdsp::FourBandCrossover xover_[2];
+  hdsp::LinkwitzRiley4 xover2_[2];
+  hdsp::ThreeBandCrossover xover3_[2];
+  hdsp::FourBandCrossover xover4_[2];
   hdsp::SpectrumAnalyzer spectrum_;
   hdsp::Smoothed outputSmooth_;
   float xover1Cur_ = 120.0f;
