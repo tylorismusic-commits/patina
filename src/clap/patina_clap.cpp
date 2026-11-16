@@ -409,6 +409,7 @@ bool paramsValueToText(const clap_plugin_t*, clap_id id, double value,
       return true;
     case P_ENABLED:
     case P_AUTO_GAIN:
+    case P_MB:
       std::snprintf(out, size, "%s", value > 0.5 ? "On" : "Off");
       return true;
     case P_DRIVE:
@@ -419,6 +420,16 @@ bool paramsValueToText(const clap_plugin_t*, clap_id id, double value,
     case P_TONE:
     case P_MIX:
       std::snprintf(out, size, "%.0f%%", value * 100.0);
+      return true;
+    case P_XOVER1:
+    case P_XOVER2:
+      std::snprintf(out, size, value >= 1000.0 ? "%.1f kHz" : "%.0f Hz",
+                    value >= 1000.0 ? value / 1000.0 : value);
+      return true;
+    case P_BAND:
+      std::snprintf(
+          out, size, "%s",
+          kBandLabels[std::clamp(static_cast<int>(value + 0.5), 0, 2)]);
       return true;
     case P_METER:
       std::snprintf(
@@ -431,9 +442,39 @@ bool paramsValueToText(const clap_plugin_t*, clap_id id, double value,
           kOversampleLabels[std::clamp(static_cast<int>(value + 0.5), 0, 2)]);
       return true;
     default:
-      std::snprintf(out, size, "%.2f", value);
-      return true;
+      break;
   }
+  if (id >= P_B0_MODEL && id < P_COUNT) {
+    const uint32_t offset = id - P_B0_MODEL;
+    const BandField field = static_cast<BandField>(offset % BF_COUNT);
+    switch (field) {
+      case BF_MODEL:
+        std::snprintf(
+            out, size, "%s",
+            kModelLabels[std::clamp(static_cast<int>(value + 0.5), 0,
+                                    static_cast<int>(Model::Count) - 1)]);
+        return true;
+      case BF_INPUT:
+      case BF_OUTPUT:
+        std::snprintf(out, size, "%+.1f dB", -12.0 + 24.0 * value);
+        return true;
+      case BF_DRIVE:
+        std::snprintf(out, size, "%+.1f dB", -12.0 + 24.0 * value);
+        return true;
+      case BF_CHARACTER:
+      case BF_TONE:
+      case BF_MIX:
+        std::snprintf(out, size, "%.0f%%", value * 100.0);
+        return true;
+      case BF_ON:
+        std::snprintf(out, size, "%s", value > 0.5 ? "On" : "Off");
+        return true;
+      default:
+        break;
+    }
+  }
+  std::snprintf(out, size, "%.2f", value);
+  return true;
 }
 
 bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
@@ -460,6 +501,7 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
       break;
     case P_ENABLED:
     case P_AUTO_GAIN:
+    case P_MB:
       if (strcasecmp(text, "On") == 0) {
         *value = 1.0;
         return true;
@@ -481,8 +523,33 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
         return true;
       }
       break;
+    case P_BAND:
+      if (matchList(kBandLabels, 3, &v)) {
+        *value = v;
+        return true;
+      }
+      break;
     default:
       break;
+  }
+  if (id >= P_B0_MODEL && id < P_COUNT) {
+    const uint32_t offset = id - P_B0_MODEL;
+    const BandField field = static_cast<BandField>(offset % BF_COUNT);
+    if (field == BF_MODEL &&
+        matchList(kModelLabels, static_cast<int>(Model::Count), &v)) {
+      *value = v;
+      return true;
+    }
+    if (field == BF_ON) {
+      if (strcasecmp(text, "On") == 0) {
+        *value = 1.0;
+        return true;
+      }
+      if (strcasecmp(text, "Off") == 0) {
+        *value = 0.0;
+        return true;
+      }
+    }
   }
   char* end = nullptr;
   v = std::strtod(text, &end);
@@ -569,33 +636,63 @@ const clap_plugin_params_t kParamsExt = {
 
 // --- State ------------------------------------------------------------------
 
+constexpr uint32_t kStateMagic = 0x50544E41u; // "PTNA"
+constexpr uint32_t kStateVersion = 2;
+
 bool stateSave(const clap_plugin_t* p, const clap_ostream_t* stream) {
   Plugin* s = self(p);
+  const uint32_t header[4] = {kStateMagic, kStateVersion, P_COUNT, 0};
   double values[P_COUNT];
   for (uint32_t i = 0; i < P_COUNT; ++i) {
     values[i] = s->shared.get(i);
   }
   const double scale = s->editor.scale();
+  const int64_t writtenHeader = stream->write(stream, header, sizeof(header));
   const int64_t written = stream->write(stream, values, sizeof(values));
   const int64_t writtenScale = stream->write(stream, &scale, sizeof(scale));
-  return written == static_cast<int64_t>(sizeof(values)) &&
+  return writtenHeader == static_cast<int64_t>(sizeof(header)) &&
+         written == static_cast<int64_t>(sizeof(values)) &&
          writtenScale == static_cast<int64_t>(sizeof(scale));
 }
 
 bool stateLoad(const clap_plugin_t* p, const clap_istream_t* stream) {
   Plugin* s = self(p);
-  double values[P_COUNT];
-  const int64_t got = stream->read(stream, values, sizeof(values));
-  if (got != static_cast<int64_t>(sizeof(values))) {
+  uint32_t header[4] = {};
+  const int64_t gotHeader = stream->read(stream, header, sizeof(header));
+  if (gotHeader != static_cast<int64_t>(sizeof(header))) {
     return false;
   }
-  for (uint32_t i = 0; i < P_COUNT; ++i) {
-    s->shared.setFromHost(i, values[i]);
+
+  double scale = 0.0;
+  if (header[0] == kStateMagic) {
+    if (header[1] != kStateVersion || header[2] > 64) {
+      return false;
+    }
+    double values[64] = {};
+    const uint32_t count = header[2];
+    if (stream->read(stream, values, count * sizeof(double)) !=
+        static_cast<int64_t>(count * sizeof(double))) {
+      return false;
+    }
+    for (uint32_t i = 0; i < count && i < P_COUNT; ++i) {
+      s->shared.setFromHost(i, values[i]);
+    }
+  } else {
+    // Patina 0.1.0 wrote ten doubles + scale with no header.  The two doubles
+    // already read as the header are the first two legacy values.
+    double legacy[10] = {};
+    std::memcpy(legacy, header, sizeof(header));
+    if (stream->read(stream, legacy + 2, 8 * sizeof(double)) !=
+        static_cast<int64_t>(8 * sizeof(double))) {
+      return false;
+    }
+    for (uint32_t i = 0; i < 10; ++i) {
+      s->shared.setFromHost(i, legacy[i]);
+    }
   }
   noteHostChanges(s);
-  // The UI scale is optional, so states saved before it still load.
-  double scale = 0.0;
-  if (stream->read(stream, &scale, sizeof(scale)) == static_cast<int64_t>(sizeof(scale)) &&
+  if (stream->read(stream, &scale, sizeof(scale)) ==
+          static_cast<int64_t>(sizeof(scale)) &&
       scale > 0.0) {
     s->editor.resize(scale);
   }
@@ -787,6 +884,10 @@ clap_process_status pluginProcess(const clap_plugin_t* p, const clap_process_t* 
   s->shared.outPeakL.store(s->meters.outPeakL, std::memory_order_relaxed);
   s->shared.outPeakR.store(s->meters.outPeakR, std::memory_order_relaxed);
   s->shared.outVu.store(s->meters.outVu, std::memory_order_relaxed);
+  for (int b = 0; b < 3; ++b) {
+    s->shared.bandLevel[b].store(s->meters.bandLevel[b],
+                                 std::memory_order_relaxed);
+  }
   noteHostChanges(s);
   return CLAP_PROCESS_CONTINUE;
 }

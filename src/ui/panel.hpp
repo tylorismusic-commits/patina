@@ -26,6 +26,7 @@ struct PanelState {
   float outLevelL = 0.0f;
   float outLevelR = 0.0f;
   float outPeakHold = 0.0f;
+  float bandLevel[3] = {-120.0f, -120.0f, -120.0f};
 };
 
 class Panel {
@@ -68,7 +69,18 @@ public:
   std::vector<WidgetRect> widgetRects() const;
 
 private:
-  enum class Kind { Knob, ModelTab, MeterSegment, Power, Pill, Cycle };
+  enum class Kind {
+    Knob,
+    ModelTab,
+    MeterSegment,
+    Power,
+    Pill,
+    Cycle,
+    BandTab,
+    BandToggle,
+    BandSolo,
+    Crossover
+  };
 
   struct Widget {
     Kind kind = Kind::Knob;
@@ -93,6 +105,12 @@ private:
   void drawBody(cairo_t* cr, int model) const;
   void drawDisplay(cairo_t* cr, const Shared& shared, const PanelState& state,
                    int model) const;
+  void drawMultibandDisplay(cairo_t* cr, const Shared& shared,
+                            const PanelState& state, int model, double fx,
+                            double fy, double fw, double fh) const;
+  void drawShapeInset(cairo_t* cr, const Shared& shared, const PanelState& state,
+                      int model, int mode, double x, double y, double w,
+                      double h) const;
   void drawLeds(cairo_t* cr, const Shared& shared) const;
   void drawLevelMeter(cairo_t* cr, double x, double y, double w, double h,
                       double dbL, double dbR, double minDb, double maxDb,
@@ -107,11 +125,18 @@ private:
   bool isLit(const Shared& shared, const Widget& w) const;
   bool hitWidget(const Widget& w, double x, double y) const;
 
+  int selectedBand(const Shared& shared) const;
+  int displayModel(const Shared& shared) const;
+
   std::vector<Widget> widgets_;
   int dragParam_ = -1;
+  bool dragCrossover_ = false;
   double dragStartY_ = 0.0;
+  double dragStartX_ = 0.0;
   double dragStartValue_ = 0.0;
   int dragSteps_ = 0;
+  double displayX_ = 182.0;
+  double displayW_ = 546.0;
 
   cairo_surface_t* grain_ = nullptr;
   void* ft_ = nullptr;

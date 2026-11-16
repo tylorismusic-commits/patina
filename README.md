@@ -1,7 +1,8 @@
 # Patina
 
 A five-model saturation plugin for Linux, in the same visual language as Comp
-Suite. GPL-3.0-or-later.
+Suite. Patina runs as a quick single-band saturator or as a three-band
+multiband colour box with a different model per band. GPL-3.0-or-later.
 
 The CLAP bundle is built and installable; LV2 wiring is next.
 
@@ -17,9 +18,25 @@ The CLAP bundle is built and installable; LV2 wiring is next.
 
 ## Controls
 
-Drive · Character · Tone · Mix · Output · Auto Gain · Oversampling (Off/2×/4×).
-The display switches between **Shape** (transfer curve), **Scope** (input vs
-shaped sine) and **Off**.
+Single-band: Drive · Character · Tone · Mix · Output · Auto Gain ·
+Oversampling (Off/2×/4×). The display switches between **Shape** (transfer
+curve), **Scope** (input vs shaped sine) and **Off**.
+
+### Multiband
+
+Switch on **Multiband** for three bands with Linkwitz-Riley 4th-order
+crossovers (defaults 120 Hz and 2.5 kHz, draggable in the display):
+
+- Every band has its own **model**, **input**, **drive**, **character**,
+  **tone**, **mix**, **output**, mute and solo.
+- The model tabs and knobs edit the selected band; the band row switches
+  between Low, Mid and High.
+- **Bands** view shows the three regions, live band energy and crossover
+  handles. **Scope** draws the selected band's shaped waveform inside its
+  region; **Off** hides the overlay.
+- The master **Output**, Auto Gain and oversampling are global.
+- Switching from single-band seeds all three bands with the current sound;
+  switching back carries the selected band into single-band mode.
 
 ## Shared DSP
 
@@ -52,11 +69,14 @@ Render the panel previews:
 - [x] Panel in the Comp Suite visual language (shape/scope displays)
 - [x] Factory presets
 - [x] DSP tests
+- [x] Three-band multiband mode with per-band models and crossovers
 - [x] CLAP
 - [ ] LV2
 - [x] Host/state/latency integration
 
-The previews and the CLAP editor render from the same Panel class.
+The previews and the CLAP editor render from the same Panel class. Multiband
+previews are in `docs/patina-mb-low.png`, `patina-mb-mid.png`,
+`patina-mb-high.png` and `patina-mb-scope.png`.
 
 ## Licence
 

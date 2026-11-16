@@ -38,70 +38,46 @@ inline float modelShape(int model, float drive, float character, float x) {
   return (std::tanh(k * x + bias) - tb) / norm;
 }
 
-class SaturationEngine {
+// One saturating band: input trim, drive, model shaping, tone, mix and output
+// trim.  The global output, auto gain and oversampling live in the engine so
+// single-band and multiband share exactly the same signal path.
+class BandSaturator {
 public:
-  void prepare(float sampleRate, float oversampleMode = -1.0f) noexcept {
-    baseRate_ = sampleRate > 0.0f ? sampleRate : 48000.0f;
-    if (oversampleMode >= 0.0f) {
-      controls_.oversample = oversampleMode;
-    }
-    configure(factorFor(controls_.oversample));
-    setControls(controls_);
-    driveSmooth_.snap();
-    mixSmooth_.snap();
-    outputSmooth_.snap();
+  void prepare(float sampleRate) noexcept {
+    rate_ = sampleRate > 0.0f ? sampleRate : 48000.0f;
+    inputSmooth_.setTime(12.0f, rate_);
+    driveSmooth_.setTime(15.0f, rate_);
+    mixSmooth_.setTime(10.0f, rate_);
+    outputSmooth_.setTime(15.0f, rate_);
+    enableSmooth_.setTime(8.0f, rate_);
+    reset();
+    setFilters();
   }
 
-  // Oversampling changes the reported latency, so a host only accepts them
-  // while the plugin is being activated.  The CLAP wrapper defers the switch
-  // to the next prepare() and asks the host to restart.
-  void setDeferOversample(bool defer) noexcept { deferOversample_ = defer; }
-
-  void setControls(const Controls& c) noexcept {
-    const int factor = factorFor(c.oversample);
-    if (!deferOversample_ && factor != factor_) {
-      configure(factor);
-    }
+  void setControls(const BandControls& c, int soloBand, int band) noexcept {
     controls_ = c;
-    controls_.model =
-        std::min(std::max(c.model, 0), static_cast<int>(Model::Count) - 1);
-    model_ = controls_.model;
-
+    model_ = std::min(std::max(c.model, 0), static_cast<int>(Model::Count) - 1);
+    inputSmooth_.setTarget(
+        hdsp::dbToGain(-12.0f + 24.0f * clamp01(c.input)));
     driveSmooth_.setTarget(
         hdsp::dbToGain(-12.0f + 24.0f * clamp01(c.drive)));
     mixSmooth_.setTarget(clamp01(c.mix));
     outputSmooth_.setTarget(
         hdsp::dbToGain(-12.0f + 24.0f * clamp01(c.output)));
-
+    const bool audible = c.enabled && (soloBand < 0 || soloBand == band);
+    enableSmooth_.setTarget(audible ? 1.0f : 0.0f);
     setFilters();
   }
 
-  // Latency of the current oversampling mode, in base-rate samples.
-  int latencySamples() const noexcept { return os_.latencySamples(); }
-
-  void process(float* left, float* right, int frames, Meters& meters) noexcept {
-    Stats st;
-    if (factor_ == 1) {
-      processBlock(left, right, frames, st);
-    } else {
-      for (int start = 0; start < frames;
-           start += hdsp::Oversampler::kMaxBaseFrames) {
-        const int n =
-            std::min(hdsp::Oversampler::kMaxBaseFrames, frames - start);
-        os_.up(left + start, right + start, n, osL_, osR_);
-        processBlock(osL_, osR_, n * factor_, st);
-        os_.down(osL_, osR_, n, left + start, right + start);
-      }
-    }
-    meters.inPeakL = hdsp::gainToDb(st.inL);
-    meters.inPeakR = hdsp::gainToDb(st.inR);
-    meters.outPeakL = hdsp::gainToDb(st.outL);
-    meters.outPeakR = hdsp::gainToDb(st.outR);
-    meters.outVu = hdsp::gainToDb(std::sqrt(vuPower_)) + 18.0f;
+  void snap() noexcept {
+    inputSmooth_.snap();
+    driveSmooth_.snap();
+    mixSmooth_.snap();
+    outputSmooth_.snap();
+    enableSmooth_.snap();
   }
 
   void reset() noexcept {
-    os_.reset();
     for (int ch = 0; ch < 2; ++ch) {
       pre_[ch].reset();
       tone_[ch].reset();
@@ -109,41 +85,46 @@ public:
       hp_[ch].reset();
       shaper_[ch].reset();
     }
-    inPower_ = 0.0f;
-    outPower_ = 0.0f;
-    autoDb_ = 0.0f;
-    vuPower_ = 0.0f;
+  }
+
+  inline void process(float& left, float& right) noexcept {
+    const float in = inputSmooth_.next();
+    const float drive = driveSmooth_.next();
+    const float mix = mixSmooth_.next();
+    const float out = outputSmooth_.next();
+    const float gate = enableSmooth_.next();
+
+    const float dryL = left * in;
+    const float dryR = right * in;
+
+    const float k = 1.0f + 5.0f * clamp01(controls_.drive);
+    const float trim = hdsp::dbToGain(kModelTrimDb[model_]);
+
+    float xL = pre_[0].process(dryL * drive);
+    float xR = pre_[1].process(dryR * drive);
+
+    xL = shaper_[0].process(xL, k, biasFor(0));
+    xR = shaper_[1].process(xR, k, biasFor(1));
+    xL = tone_[0].process(xL);
+    xR = tone_[1].process(xR);
+    if (model_ == static_cast<int>(Model::Tape)) {
+      xL = lp_[0].process(xL);
+      xR = lp_[1].process(xR);
+    }
+    xL = hp_[0].process(xL);
+    xR = hp_[1].process(xR);
+    xL *= trim;
+    xR *= trim;
+
+    const float yL = (dryL + mix * (xL - dryL)) * out * gate;
+    const float yR = (dryR + mix * (xR - dryR)) * out * gate;
+    left = std::isfinite(yL) ? yL : 0.0f;
+    right = std::isfinite(yR) ? yR : 0.0f;
   }
 
 private:
-  struct Stats {
-    float inL = 0.0f;
-    float inR = 0.0f;
-    float outL = 0.0f;
-    float outR = 0.0f;
-  };
-
-  static int factorFor(float mode) noexcept {
-    const int m = std::min(std::max(static_cast<int>(mode + 0.5f), 0), 2);
-    return m == 0 ? 1 : (m == 1 ? 2 : 4);
-  }
-
   static float clamp01(float x) noexcept {
     return std::min(std::max(x, 0.0f), 1.0f);
-  }
-
-  void configure(int factor) noexcept {
-    factor_ = factor;
-    osRate_ = baseRate_ * static_cast<float>(factor_);
-    os_.prepare(factor_);
-    driveSmooth_.setTime(15.0f, osRate_);
-    mixSmooth_.setTime(10.0f, osRate_);
-    outputSmooth_.setTime(15.0f, osRate_);
-    vuCoeff_ = hdsp::timeCoeff(300.0f, osRate_);
-    autoPowerCoeff_ = hdsp::timeCoeff(120.0f, osRate_);
-    autoDbCoeff_ = hdsp::timeCoeff(250.0f, osRate_);
-    reset();
-    setFilters();
   }
 
   void setFilters() noexcept {
@@ -176,17 +157,17 @@ private:
           preDb += 1.2f * character;
           break;
       }
-      pre_[ch].lowShelf(preHz, preDb, 0.7f, osRate_);
-      tone_[ch].highShelf(3500.0f + 1500.0f * tone, high, 0.7f, osRate_);
+      pre_[ch].lowShelf(preHz, preDb, 0.7f, rate_);
+      tone_[ch].highShelf(3500.0f + 1500.0f * tone, high, 0.7f, rate_);
 
       if (model_ == static_cast<int>(Model::Tape)) {
-        lp_[ch].lowPass(12000.0f + 6000.0f * tone, 0.7071f, osRate_);
+        lp_[ch].lowPass(12000.0f + 6000.0f * tone, 0.7071f, rate_);
       } else {
-        lp_[ch].lowPass(21000.0f, 0.7071f, osRate_);
+        lp_[ch].lowPass(21000.0f, 0.7071f, rate_);
       }
       hp_[ch].highPass(model_ == static_cast<int>(Model::Transformer) ? 22.0f
                                                                       : 10.0f,
-                       0.7071f, osRate_);
+                       0.7071f, rate_);
     }
   }
 
@@ -213,37 +194,214 @@ private:
     return bias;
   }
 
+  static constexpr float kModelTrimDb[5] = {0.0f, -1.0f, -1.5f, -1.0f,
+                                            -1.0f};
+
+  float rate_ = 48000.0f;
+  int model_ = 0;
+  BandControls controls_;
+  hdsp::Smoothed inputSmooth_;
+  hdsp::Smoothed driveSmooth_;
+  hdsp::Smoothed mixSmooth_;
+  hdsp::Smoothed outputSmooth_;
+  hdsp::Smoothed enableSmooth_;
+  hdsp::Biquad pre_[2];
+  hdsp::Biquad tone_[2];
+  hdsp::Biquad lp_[2];
+  hdsp::Biquad hp_[2];
+  hdsp::AsymShaper shaper_[2];
+};
+
+class SaturationEngine {
+public:
+  void prepare(float sampleRate, float oversampleMode = -1.0f) noexcept {
+    baseRate_ = sampleRate > 0.0f ? sampleRate : 48000.0f;
+    if (oversampleMode >= 0.0f) {
+      controls_.oversample = oversampleMode;
+    }
+    configure(factorFor(controls_.oversample));
+    setControls(controls_);
+    outputSmooth_.snap();
+    for (BandSaturator& b : bands_) {
+      b.snap();
+    }
+  }
+
+  // Oversampling changes the reported latency, so a host only accepts them
+  // while the plugin is being activated.  The CLAP wrapper defers the switch
+  // to the next prepare() and asks the host to restart.
+  void setDeferOversample(bool defer) noexcept { deferOversample_ = defer; }
+
+  void setControls(const Controls& c) noexcept {
+    const int factor = factorFor(c.oversample);
+    if (!deferOversample_ && factor != factor_) {
+      configure(factor);
+    }
+    controls_ = c;
+    controls_.xover1 = std::min(std::max(c.xover1, 40.0f), 800.0f);
+    controls_.xover2 = std::min(std::max(c.xover2, 800.0f), 12000.0f);
+    if (controls_.xover2 <= controls_.xover1) {
+      controls_.xover2 = controls_.xover1 + 20.0f;
+    }
+
+    for (int b = 0; b < 3; ++b) {
+      bands_[b].setControls(controls_.bands[b], controls_.soloBand, b);
+    }
+    outputSmooth_.setTarget(
+        hdsp::dbToGain(-12.0f + 24.0f * clamp01(c.output)));
+    if (controls_.multiband) {
+      updateCrossovers(false);
+    }
+  }
+
+  // Latency of the current oversampling mode, in base-rate samples.
+  int latencySamples() const noexcept { return os_.latencySamples(); }
+
+  void process(float* left, float* right, int frames, Meters& meters) noexcept {
+    Stats st;
+    for (int b = 0; b < 3; ++b) {
+      st.band[b] = 0.0f;
+    }
+    if (factor_ == 1) {
+      processBlock(left, right, frames, st);
+    } else {
+      for (int start = 0; start < frames;
+           start += hdsp::Oversampler::kMaxBaseFrames) {
+        const int n =
+            std::min(hdsp::Oversampler::kMaxBaseFrames, frames - start);
+        os_.up(left + start, right + start, n, osL_, osR_);
+        processBlock(osL_, osR_, n * factor_, st);
+        os_.down(osL_, osR_, n, left + start, right + start);
+      }
+    }
+    meters.inPeakL = hdsp::gainToDb(st.inL);
+    meters.inPeakR = hdsp::gainToDb(st.inR);
+    meters.outPeakL = hdsp::gainToDb(st.outL);
+    meters.outPeakR = hdsp::gainToDb(st.outR);
+    meters.outVu = hdsp::gainToDb(std::sqrt(vuPower_)) + 18.0f;
+    for (int b = 0; b < 3; ++b) {
+      meters.bandLevel[b] = hdsp::gainToDb(st.band[b]);
+    }
+  }
+
+  void reset() noexcept {
+    os_.reset();
+    for (BandSaturator& b : bands_) {
+      b.reset();
+    }
+    for (hdsp::ThreeBandCrossover& xo : xover_) {
+      xo.reset();
+    }
+    inPower_ = 0.0f;
+    outPower_ = 0.0f;
+    autoDb_ = 0.0f;
+    vuPower_ = 0.0f;
+  }
+
+private:
+  struct Stats {
+    float inL = 0.0f;
+    float inR = 0.0f;
+    float outL = 0.0f;
+    float outR = 0.0f;
+    float band[3] = {0.0f, 0.0f, 0.0f};
+  };
+
+  static int factorFor(float mode) noexcept {
+    const int m = std::min(std::max(static_cast<int>(mode + 0.5f), 0), 2);
+    return m == 0 ? 1 : (m == 1 ? 2 : 4);
+  }
+
+  static float clamp01(float x) noexcept {
+    return std::min(std::max(x, 0.0f), 1.0f);
+  }
+
+  void configure(int factor) noexcept {
+    factor_ = factor;
+    osRate_ = baseRate_ * static_cast<float>(factor_);
+    os_.prepare(factor_);
+    for (BandSaturator& b : bands_) {
+      b.prepare(osRate_);
+    }
+    for (hdsp::ThreeBandCrossover& xo : xover_) {
+      xo.prepare(osRate_);
+    }
+    outputSmooth_.setTime(15.0f, osRate_);
+    vuCoeff_ = hdsp::timeCoeff(300.0f, osRate_);
+    autoPowerCoeff_ = hdsp::timeCoeff(120.0f, osRate_);
+    autoDbCoeff_ = hdsp::timeCoeff(250.0f, osRate_);
+    xover1Cur_ = controls_.xover1;
+    xover2Cur_ = controls_.xover2;
+    updateCrossovers(true);
+    reset();
+  }
+
+  void updateCrossovers(bool snap) noexcept {
+    const float target1 = controls_.xover1;
+    const float target2 = controls_.xover2;
+    if (snap) {
+      xover1Cur_ = target1;
+      xover2Cur_ = target2;
+    } else {
+      // Block-rate smoothing: a dragged crossover moves in small steps
+      // instead of rebuilding the filters with a jump every buffer.
+      xover1Cur_ += (target1 - xover1Cur_) * 0.25f;
+      xover2Cur_ += (target2 - xover2Cur_) * 0.25f;
+    }
+    if (std::fabs(xover1Cur_ - xover1Applied_) < 0.05f &&
+        std::fabs(xover2Cur_ - xover2Applied_) < 0.05f) {
+      return;
+    }
+    xover1Applied_ = xover1Cur_;
+    xover2Applied_ = xover2Cur_;
+    for (hdsp::ThreeBandCrossover& xo : xover_) {
+      xo.setCrossovers(xover1Cur_, xover2Cur_);
+    }
+  }
+
   void processBlock(float* left, float* right, int frames,
                     Stats& st) noexcept {
-    const float driveControl = clamp01(controls_.drive);
-    const float k = 1.0f + 5.0f * driveControl;
-    const float trim = hdsp::dbToGain(kModelTrimDb[model_]);
+    const bool multiband = controls_.multiband;
     const bool enabled = controls_.enabled;
+    float out = 0.0f;
 
     for (int i = 0; i < frames; ++i) {
       const float rawL = std::isfinite(left[i]) ? left[i] : 0.0f;
       const float rawR = std::isfinite(right[i]) ? right[i] : 0.0f;
       const float dryL = std::min(std::max(rawL, -32.0f), 32.0f);
       const float dryR = std::min(std::max(rawR, -32.0f), 32.0f);
+      st.inL = std::max(st.inL, std::fabs(dryL));
+      st.inR = std::max(st.inR, std::fabs(dryR));
 
-      const float drive = driveSmooth_.next();
-      float xL = pre_[0].process(dryL * drive);
-      float xR = pre_[1].process(dryR * drive);
+      float wetL = dryL;
+      float wetR = dryR;
 
-      xL = shaper_[0].process(xL, k, biasFor(0));
-      xR = shaper_[1].process(xR, k, biasFor(1));
-      xL = tone_[0].process(xL);
-      xR = tone_[1].process(xR);
-      if (model_ == static_cast<int>(Model::Tape)) {
-        xL = lp_[0].process(xL);
-        xR = lp_[1].process(xR);
+      if (multiband) {
+        float lowL = 0.0f, midL = 0.0f, highL = 0.0f;
+        float lowR = 0.0f, midR = 0.0f, highR = 0.0f;
+        xover_[0].process(dryL, lowL, midL, highL);
+        xover_[1].process(dryR, lowR, midR, highR);
+        float bandL[3] = {lowL, midL, highL};
+        float bandR[3] = {lowR, midR, highR};
+        wetL = 0.0f;
+        wetR = 0.0f;
+        for (int b = 0; b < 3; ++b) {
+          bands_[b].process(bandL[b], bandR[b]);
+          st.band[b] =
+              std::max(st.band[b], std::max(std::fabs(bandL[b]),
+                                            std::fabs(bandR[b])));
+          wetL += bandL[b];
+          wetR += bandR[b];
+        }
+      } else {
+        bands_[0].process(wetL, wetR);
+        st.band[0] =
+            std::max(st.band[0], std::max(std::fabs(wetL), std::fabs(wetR)));
       }
-      xL = hp_[0].process(xL);
-      xR = hp_[1].process(xR);
 
       if (controls_.autoGain) {
         const float inPower = 0.5f * (dryL * dryL + dryR * dryR);
-        const float outPower = 0.5f * (xL * xL + xR * xR);
+        const float outPower = 0.5f * (wetL * wetL + wetR * wetR);
         inPower_ += (inPower - inPower_) * (1.0f - autoPowerCoeff_);
         outPower_ += (outPower - outPower_) * (1.0f - autoPowerCoeff_);
         const float wanted =
@@ -252,17 +410,13 @@ private:
         autoDb_ += (wanted - autoDb_) * (1.0f - autoDbCoeff_);
         const float make = hdsp::dbToGain(
             std::min(std::max(autoDb_, -18.0f), 12.0f));
-        xL *= make;
-        xR *= make;
+        wetL *= make;
+        wetR *= make;
       }
 
-      xL *= trim;
-      xR *= trim;
-
-      const float mix = enabled ? mixSmooth_.next() : 0.0f;
-      const float out = outputSmooth_.next();
-      float yL = dryL + mix * (xL - dryL);
-      float yR = dryR + mix * (xR - dryR);
+      out = outputSmooth_.next();
+      float yL = wetL;
+      float yR = wetR;
       if (!enabled) {
         yL = dryL;
         yR = dryR;
@@ -273,8 +427,6 @@ private:
 
       left[i] = std::isfinite(yL) ? yL : 0.0f;
       right[i] = std::isfinite(yR) ? yR : 0.0f;
-      st.inL = std::max(st.inL, std::fabs(dryL));
-      st.inR = std::max(st.inR, std::fabs(dryR));
       st.outL = std::max(st.outL, std::fabs(left[i]));
       st.outR = std::max(st.outR, std::fabs(right[i]));
       const float power = 0.5f * (left[i] * left[i] + right[i] * right[i]);
@@ -282,24 +434,19 @@ private:
     }
   }
 
-  static constexpr float kModelTrimDb[5] = {0.0f, -1.0f, -1.5f, -1.0f,
-                                            -1.0f};
-
   bool deferOversample_ = false;
   float baseRate_ = 48000.0f;
   float osRate_ = 48000.0f;
   int factor_ = 1;
-  int model_ = 0;
   Controls controls_;
   hdsp::Oversampler os_;
-  hdsp::Smoothed driveSmooth_;
-  hdsp::Smoothed mixSmooth_;
+  BandSaturator bands_[3];
+  hdsp::ThreeBandCrossover xover_[2];
   hdsp::Smoothed outputSmooth_;
-  hdsp::Biquad pre_[2];
-  hdsp::Biquad tone_[2];
-  hdsp::Biquad lp_[2];
-  hdsp::Biquad hp_[2];
-  hdsp::AsymShaper shaper_[2];
+  float xover1Cur_ = 120.0f;
+  float xover2Cur_ = 2500.0f;
+  float xover1Applied_ = -1.0f;
+  float xover2Applied_ = -1.0f;
   float inPower_ = 0.0f;
   float outPower_ = 0.0f;
   float autoDb_ = 0.0f;
