@@ -130,6 +130,15 @@ public:
     return dirty_[p].load(std::memory_order_acquire);
   }
 
+  bool anyDirty() const noexcept {
+    for (uint32_t p = 0; p < P_COUNT; ++p) {
+      if (dirty_[p].load(std::memory_order_acquire)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   std::atomic<float> inPeakL;
   std::atomic<float> inPeakR;
   std::atomic<float> outPeakL;

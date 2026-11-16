@@ -40,8 +40,11 @@ inline float modelShape(int model, float drive, float character, float x) {
 
 class SaturationEngine {
 public:
-  void prepare(float sampleRate) noexcept {
+  void prepare(float sampleRate, float oversampleMode = -1.0f) noexcept {
     baseRate_ = sampleRate > 0.0f ? sampleRate : 48000.0f;
+    if (oversampleMode >= 0.0f) {
+      controls_.oversample = oversampleMode;
+    }
     configure(factorFor(controls_.oversample));
     setControls(controls_);
     driveSmooth_.snap();
@@ -49,9 +52,14 @@ public:
     outputSmooth_.snap();
   }
 
+  // Oversampling changes the reported latency, so a host only accepts them
+  // while the plugin is being activated.  The CLAP wrapper defers the switch
+  // to the next prepare() and asks the host to restart.
+  void setDeferOversample(bool defer) noexcept { deferOversample_ = defer; }
+
   void setControls(const Controls& c) noexcept {
     const int factor = factorFor(c.oversample);
-    if (factor != factor_) {
+    if (!deferOversample_ && factor != factor_) {
       configure(factor);
     }
     controls_ = c;
@@ -277,6 +285,7 @@ private:
   static constexpr float kModelTrimDb[5] = {0.0f, -1.0f, -1.5f, -1.0f,
                                             -1.0f};
 
+  bool deferOversample_ = false;
   float baseRate_ = 48000.0f;
   float osRate_ = 48000.0f;
   int factor_ = 1;
