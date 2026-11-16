@@ -477,13 +477,13 @@ void Panel::layout(const Shared& shared) {
     knob(bandParam(sel, BF_TONE), 595, 470, 26, "TONE", sc(kScaleTone));
     knob(bandParam(sel, BF_MIX), 715, 470, 26, "MIX", sc(kScaleMix));
     knob(bandParam(sel, BF_LEVEL), 835, 470, 26, "LEVEL", sc(kScaleLevel));
-    knob(P_OUTPUT, 930, 500, 24, "MASTER", sc(kScaleOutput));
+    knob(P_OUTPUT, 920, 500, 24, "MASTER", sc(kScaleOutput));
   } else {
-    knob(P_DRIVE, 300, 430, 40, "DRIVE", sc(kScaleDrive));
-    knob(P_CHARACTER, 470, 430, 34, "CHARACTER", sc(kScaleCharacter));
-    knob(P_TONE, 620, 430, 34, "TONE", sc(kScaleTone));
-    knob(P_MIX, 796, 508, 25, "MIX", sc(kScaleMix), true);
-    knob(P_OUTPUT, 912, 500, 27, "OUTPUT", sc(kScaleOutput));
+    knob(P_DRIVE, 300, 455, 40, "DRIVE", sc(kScaleDrive));
+    knob(P_CHARACTER, 470, 455, 34, "CHARACTER", sc(kScaleCharacter));
+    knob(P_TONE, 620, 455, 34, "TONE", sc(kScaleTone));
+    knob(P_MIX, 796, 535, 25, "MIX", sc(kScaleMix), true);
+    knob(P_OUTPUT, 912, 525, 27, "OUTPUT", sc(kScaleOutput));
   }
 
   {

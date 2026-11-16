@@ -65,12 +65,9 @@ void run(LV2_Handle handle, uint32_t frames) {
   if (!inL || !outL) {
     return;
   }
-  // Mono or partially connected hosts: mirror the left channel.
+  // Mono or partially connected hosts: mirror the left input.
   if (!inR) {
     inR = inL;
-  }
-  if (!outR) {
-    outR = outL;
   }
 
   // Pull host parameter values in.  Apply each port the first time it appears
@@ -96,14 +93,27 @@ void run(LV2_Handle handle, uint32_t frames) {
   p->engine.setControls(patina::controlsFrom(p->shared));
 
   // In-place when the host provides the same buffer, otherwise copy.
-  if (outL != inL) {
-    std::memcpy(outL, inL, frames * sizeof(float));
+  if (outR) {
+    if (outL != inL) {
+      std::memcpy(outL, inL, frames * sizeof(float));
+    }
+    if (outR != inR) {
+      std::memcpy(outR, inR, frames * sizeof(float));
+    }
+    p->engine.process(outL, outR, static_cast<int>(frames), p->meters);
+  } else {
+    // Mono host output: process in chunks, keeping the left channel.
+    float scratch[512];
+    for (uint32_t offset = 0; offset < frames; offset += 512) {
+      const uint32_t n = std::min<uint32_t>(512, frames - offset);
+      if (outL + offset != inL + offset) {
+        std::memcpy(outL + offset, inL + offset, n * sizeof(float));
+      }
+      std::memcpy(scratch, inR + offset, n * sizeof(float));
+      p->engine.process(outL + offset, scratch, static_cast<int>(n),
+                        p->meters);
+    }
   }
-  if (outR != inR) {
-    std::memcpy(outR, inR, frames * sizeof(float));
-  }
-
-  p->engine.process(outL, outR, static_cast<int>(frames), p->meters);
 
   for (uint32_t b = 0; b < patina::kLv2BandLevelCount; ++b) {
     float* v = p->ports[patina::kLv2FirstBandLevel + b];

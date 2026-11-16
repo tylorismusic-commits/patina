@@ -5,10 +5,8 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#include <X11/keysym.h>
 #include <cairo-xlib.h>
 #include <dlfcn.h>
-#include <sys/time.h>
 
 #include <algorithm>
 #include <atomic>
@@ -18,7 +16,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <condition_variable>
-#include <cstdarg>
 #include <functional>
 #include <mutex>
 #include <string>
@@ -33,28 +30,6 @@
 
 namespace patina {
 namespace {
-
-// Set PATINA_DEBUG=1 to trace the editor thread to /tmp/patina-ui.log.
-bool debugOn() {
-  static const bool on = std::getenv("PATINA_DEBUG") != nullptr;
-  return on;
-}
-
-void dbg(const char* fmt, ...) {
-  if (!debugOn()) {
-    return;
-  }
-  FILE* f = std::fopen("/tmp/patina-ui.log", "a");
-  if (!f) {
-    return;
-  }
-  va_list ap;
-  va_start(ap, fmt);
-  std::vfprintf(f, fmt, ap);
-  va_end(ap);
-  std::fputc('\n', f);
-  std::fclose(f);
-}
 
 constexpr const char* kPluginId = "com.tylorismusic.patina";
 constexpr const char* kPluginName = "Patina";
@@ -135,9 +110,7 @@ public:
 
 private:
   void run() {
-    dbg("thread start");
     Display* dpy = XOpenDisplay(nullptr);
-    dbg("display=%p", static_cast<void*>(dpy));
     if (!dpy) {
       std::lock_guard<std::mutex> lock(mutex_);
       openFailed_ = true;
@@ -186,12 +159,8 @@ private:
     // surface whose visual does not match the drawable.
     XWindowAttributes wa{};
     XGetWindowAttributes(dpy, win, &wa);
-    dbg("window=%lu depth=%d visual=%p size=%dx%d", win, wa.depth,
-        static_cast<void*>(wa.visual), current.width, current.height);
     cairo_surface_t* windowSurface =
         cairo_xlib_surface_create(dpy, win, wa.visual, current.width, current.height);
-    dbg("xlib surface status=%s",
-        cairo_status_to_string(cairo_surface_status(windowSurface)));
     const cairo_format_t imageFormat =
         wa.depth == 32 ? CAIRO_FORMAT_ARGB32 : CAIRO_FORMAT_RGB24;
     cairo_surface_t* backing = nullptr;
@@ -259,13 +228,6 @@ private:
       // this flush nothing reaches the server (the window stays black).
       cairo_surface_flush(windowSurface);
       XFlush(dpy);
-      static int frames = 0;
-      if (debugOn() && (frames++ % 120) == 0) {
-        XWindowAttributes ga;
-        XGetWindowAttributes(dpy, win, &ga);
-        dbg("frame %d geom=%dx%d mapped=%d", frames, ga.width, ga.height,
-            ga.map_state == IsViewable);
-      }
       if (requestFlush && shared_.anyDirty()) {
         requestFlush();
       }
@@ -339,8 +301,8 @@ struct Plugin {
   Shared shared;
   SaturationEngine engine;
   Editor editor{shared};
-  double sampleRate = 48000.0;
   Meters meters;
+  std::vector<float> monoRight;
   std::atomic<int> reportedOversample{-1};
   std::atomic<uint32_t> reportedLatency{0xffffffffu};
   std::atomic<bool> rescanQueued{false};
@@ -478,8 +440,6 @@ bool paramsValueToText(const clap_plugin_t* p, clap_id id, double value,
                                     static_cast<int>(Model::Count) - 1)]);
         return true;
       case BF_INPUT:
-        std::snprintf(out, size, "%+.1f dB", -12.0 + 24.0 * value);
-        return true;
       case BF_DRIVE:
         std::snprintf(out, size, "%+.1f dB", -12.0 + 24.0 * value);
         return true;
@@ -954,12 +914,13 @@ const clap_plugin_state_t kStateExt = {stateSave, stateLoad};
 
 // --- Audio ports ------------------------------------------------------------
 
-uint32_t audioPortsCount(const clap_plugin_t*, bool isInput) {
-  return isInput ? 1 : 1;
-}
+uint32_t audioPortsCount(const clap_plugin_t*, bool) { return 1; }
 
 bool audioPortsInfo(const clap_plugin_t*, uint32_t index, bool isInput,
                     clap_audio_port_info_t* info) {
+  if (index != 0) {
+    return false;
+  }
   std::memset(info, 0, sizeof(*info));
   info->channel_count = 2;
   info->port_type = CLAP_PORT_STEREO;
@@ -1059,10 +1020,11 @@ void pluginDestroy(const clap_plugin_t* p) {
   delete self(p);
 }
 
-bool pluginActivate(const clap_plugin_t* p, double sampleRate, uint32_t,
-                    uint32_t) {
+bool pluginActivate(const clap_plugin_t* p, double sampleRate,
+                    uint32_t minFrames, uint32_t maxFrames) {
   Plugin* s = self(p);
-  s->sampleRate = sampleRate;
+  (void)minFrames;
+  s->monoRight.assign(std::max<uint32_t>(maxFrames, 512), 0.0f);
   // Activation is the one legal moment to change latency: apply the
   // oversampling mode the parameters requested while the plugin was idle.
   s->engine.prepare(static_cast<float>(sampleRate),
@@ -1117,14 +1079,13 @@ clap_process_status pluginProcess(const clap_plugin_t* p, const clap_process_t* 
     return CLAP_PROCESS_CONTINUE;
   }
   float* left = outBuf.data32[0];
-  float* right = outBuf.channel_count > 1 && outBuf.data32[1] ? outBuf.data32[1] : left;
   const float* inL = inBuf.data32[0];
-  const float* inR = inBuf.channel_count > 1 && inBuf.data32[1] ? inBuf.data32[1] : inL;
-  if (left != inL) {
-    std::memcpy(left, inL, frames * sizeof(float));
-  }
-  if (right != inR) {
-    std::memcpy(right, inR, frames * sizeof(float));
+  const float* inR =
+      inBuf.channel_count > 1 && inBuf.data32[1] ? inBuf.data32[1] : inL;
+  const bool monoOut = outBuf.channel_count < 2 || !outBuf.data32[1];
+  float* right = monoOut ? s->monoRight.data() : outBuf.data32[1];
+  if (!right || (monoOut && s->monoRight.size() < frames)) {
+    return CLAP_PROCESS_CONTINUE;
   }
 
   if (s->resetEngine.exchange(false, std::memory_order_relaxed)) {
@@ -1132,6 +1093,12 @@ clap_process_status pluginProcess(const clap_plugin_t* p, const clap_process_t* 
   }
   s->engine.setControls(controlsFrom(s->shared));
   if (frames > 0) {
+    if (left != inL) {
+      std::memcpy(left, inL, frames * sizeof(float));
+    }
+    if (right != inR) {
+      std::memcpy(right, inR, frames * sizeof(float));
+    }
     s->engine.process(left, right, static_cast<int>(frames), s->meters);
 
     s->shared.inPeakL.store(s->meters.inPeakL, std::memory_order_relaxed);
