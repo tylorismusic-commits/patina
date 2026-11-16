@@ -300,9 +300,10 @@ void Panel::text(cairo_t* cr, const char* s, double x, double y, double size,
   cairo_set_source_rgb(cr, r, g, b);
   cairo_text_extents_t e;
   cairo_text_extents(cr, s, &e);
-  double tx = x;
-  if (align == 1) tx = x - e.x_advance * 0.5;
-  else if (align == 2) tx = x - e.x_advance;
+  // Centre and right-align on the ink extents, not the advance width.
+  double tx = x - e.x_bearing;
+  if (align == 1) tx = x - e.x_bearing - e.width * 0.5;
+  else if (align == 2) tx = x - e.x_bearing - e.width;
   cairo_move_to(cr, tx, y);
   cairo_show_text(cr, s);
 }
@@ -353,9 +354,9 @@ void Panel::layout(const Shared& shared) {
     Widget p{};
     p.kind = Kind::Power;
     p.param = P_ENABLED;
-    p.x = 32;
-    p.y = 32;
-    p.r = 12;
+    p.x = 34;
+    p.y = 30;
+    p.r = 14;
     widgets_.push_back(p);
   }
 
@@ -476,7 +477,7 @@ void Panel::layout(const Shared& shared) {
     knob(bandParam(sel, BF_TONE), 595, 470, 26, "TONE", sc(kScaleTone));
     knob(bandParam(sel, BF_MIX), 715, 470, 26, "MIX", sc(kScaleMix));
     knob(bandParam(sel, BF_LEVEL), 835, 470, 26, "LEVEL", sc(kScaleLevel));
-    knob(P_OUTPUT, 952, 500, 24, "MASTER", sc(kScaleOutput));
+    knob(P_OUTPUT, 930, 500, 24, "MASTER", sc(kScaleOutput));
   } else {
     knob(P_DRIVE, 300, 430, 40, "DRIVE", sc(kScaleDrive));
     knob(P_CHARACTER, 470, 430, 34, "CHARACTER", sc(kScaleCharacter));
@@ -530,9 +531,9 @@ void Panel::draw(cairo_t* cr, Shared& shared, const PanelState& state) {
   drawBody(cr, model);
   drawDisplay(cr, shared, state, model);
   drawLeds(cr, shared);
-  drawLevelMeter(cr, 20, 150, 16, 352, state.inLevelL, state.inLevelR, -60.0,
+  drawLevelMeter(cr, 44, 150, 26, 380, state.inLevelL, state.inLevelR, -60.0,
                  0.0, model, false);
-  drawLevelMeter(cr, 986, 150, 16, 352, state.outLevelL, state.outLevelR,
+  drawLevelMeter(cr, 974, 150, 26, 380, state.outLevelL, state.outLevelR,
                  -60.0, 3.0, model, true);
 
   for (const Widget& w : widgets_) drawWidget(cr, w, shared, state, model);
@@ -1007,24 +1008,46 @@ void Panel::drawLevelMeter(cairo_t* cr, double x, double y, double w, double h,
   cairo_fill(cr);
   const double l = clamp01((dbL - minDb) / (maxDb - minDb));
   const double r = clamp01((dbR - minDb) / (maxDb - minDb));
-  const double bh = (h - 10) * 0.5;
+  constexpr double inset = 4.0;
+  constexpr double gap = 3.0;
+  const double barW = (w - 2.0 * inset - gap) * 0.5;
+  const double barTop = y + 5.0;
+  const double barH = h - 10.0;
+  const double greenTop = clamp01((-12.0 - minDb) / (maxDb - minDb));
+  const double yellowTop = clamp01((-3.0 - minDb) / (maxDb - minDb));
   for (int ch = 0; ch < 2; ++ch) {
     const double lv = ch == 0 ? l : r;
-    const double by = y + 5 + ch * (bh + 2);
-    roundRect(cr, x + 4, by, w - 8, bh, 1);
+    const double bx = x + inset + ch * (barW + gap);
+    roundRect(cr, bx, barTop, barW, barH, 1);
     setRgb(cr, mix(skin.meterFace, {0, 0, 0}, 0.55));
     cairo_fill(cr);
-    const double fill = bh * lv;
-    const Rgb colour = lv > 0.9 ? Rgb{1.0, 0.30, 0.24}
-                               : (lv > 0.7 ? Rgb{0.96, 0.82, 0.29}
-                                           : Rgb{0.27, 0.88, 0.42});
-    setRgb(cr, colour, 0.85);
-    cairo_rectangle(cr, x + 4, by + bh - fill, w - 8, fill);
-    cairo_fill(cr);
+
+    auto zone = [&](Rgb colour, double from, double to) {
+      if (to <= from) return;
+      setRgb(cr, colour, 0.88);
+      cairo_rectangle(cr, bx, barTop + barH - to * barH, barW,
+                      (to - from) * barH);
+      cairo_fill(cr);
+    };
+    const double greenEnd = std::min(lv, greenTop);
+    zone({0.27, 0.88, 0.42}, 0.0, greenEnd);
+    if (lv > greenTop) {
+      const double yellowEnd = std::min(lv, yellowTop);
+      zone({0.96, 0.82, 0.29}, greenTop, yellowEnd);
+      if (lv > yellowTop) zone({1.0, 0.30, 0.24}, yellowTop, lv);
+    }
   }
-  const char* labels[] = {"0", "-6", "-12", "-24", "-36", "-48", "-60"};
-  const double values[] = {0, -6, -12, -24, -36, -48, -60};
-  for (int i = 0; i < 7; ++i) {
+  static const char* const kInputLabels[] = {"0",   "-6",  "-12", "-24",
+                                             "-36", "-48", "-60"};
+  static const double kInputValues[] = {0, -6, -12, -24, -36, -48, -60};
+  static const char* const kOutputLabels[] = {"+3",  "0",   "-6",  "-12",
+                                              "-24", "-36", "-48", "-60"};
+  static const double kOutputValues[] = {3, 0, -6, -12, -24, -36, -48, -60};
+  const bool outputScale = maxDb > 0.5;
+  const char* const* labels = outputScale ? kOutputLabels : kInputLabels;
+  const double* values = outputScale ? kOutputValues : kInputValues;
+  const int labelCount = outputScale ? 8 : 7;
+  for (int i = 0; i < labelCount; ++i) {
     const double fy = y + 6 + (h - 12) * (values[i] - maxDb) / (minDb - maxDb);
     if (labelsRight) {
       text(cr, labels[i], x + w + 7, fy + 4, 9, 0, skin.legendDim.r,
@@ -1041,18 +1064,19 @@ void Panel::drawWidget(cairo_t* cr, const Widget& w, const Shared& shared,
   const Skin skin = skinFor(model);
   switch (w.kind) {
     case Kind::Power: {
+      // Shared Comp Suite power button, unchanged.
       const bool on = shared.get(P_ENABLED) > 0.5;
       cairo_arc(cr, w.x, w.y, w.r, 0, 2 * kPi);
-      setRgb(cr, {0.10, 0.10, 0.11});
+      setRgb(cr, {0.12, 0.12, 0.12});
       cairo_fill(cr);
-      cairo_arc(cr, w.x, w.y, w.r - 2, 0, 2 * kPi);
+      cairo_arc(cr, w.x, w.y, w.r - 1.5, 0, 2 * kPi);
       setRgb(cr, on ? Rgb{0.36, 0.86, 0.46} : Rgb{0.42, 0.42, 0.42});
       cairo_set_line_width(cr, 2.2);
+      cairo_new_path(cr);
+      cairo_arc(cr, w.x, w.y, 7, -kPi / 2 + 0.6, -kPi / 2 + 2 * kPi - 0.6);
       cairo_stroke(cr);
-      cairo_set_line_width(cr, 2.0);
-      cairo_move_to(cr, w.x, w.y - 6);
-      cairo_line_to(cr, w.x, w.y + 1);
-      setRgb(cr, on ? Rgb{0.80, 0.95, 0.82} : Rgb{0.62, 0.62, 0.62});
+      cairo_move_to(cr, w.x, w.y - 9);
+      cairo_line_to(cr, w.x, w.y - 1);
       cairo_stroke(cr);
       break;
     }
