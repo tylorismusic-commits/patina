@@ -3,8 +3,7 @@
 A five-model saturation plugin for Linux, in the same visual language as Comp
 Suite. GPL-3.0-or-later.
 
-This is the foundation: the saturation engine and the panel. The CLAP/LV2
-wiring comes next.
+The CLAP bundle is built and installable; LV2 wiring is next.
 
 ## Models
 
@@ -32,10 +31,14 @@ a submodule. No DSP code is copied from Comp Suite.
 
 ```sh
 git submodule update --init --recursive
-cmake -S . -B build
+cmake -S . -B build -DCLAP_DIR="$HOME/.clap"
 cmake --build build -j
 ctest --test-dir build --output-on-failure
+cmake --install build
 ```
+
+The host smoke test runs under `xvfb-run` and drives every model, the
+oversampling latency handshake, state save/load and the embedded editor.
 
 Render the panel previews:
 
@@ -49,11 +52,11 @@ Render the panel previews:
 - [x] Panel in the Comp Suite visual language (shape/scope displays)
 - [x] Factory presets
 - [x] DSP tests
-- [ ] CLAP
+- [x] CLAP
 - [ ] LV2
-- [ ] Host/state/latency integration
+- [x] Host/state/latency integration
 
-The previews render from the same Panel class the plugin editors will use.
+The previews and the CLAP editor render from the same Panel class.
 
 ## Licence
 
