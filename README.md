@@ -6,6 +6,8 @@ four-band multiband colour box with a different model per band. GPL-3.0-or-later
 
 CLAP and LV2 bundles are built and installable.
 
+![Patina — four-band multiband view with live FFT spectrum](docs/patina-mb-spectrum.png)
+
 ## Models
 
 | Tab | Character |
