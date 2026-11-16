@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.4.1 — 2026-11-15
+
+### Fixed
+
+- **Multiband oversampling retuning.** Crossover coefficients were cached by
+  frequency only; after a 2×/4× switch the filters stayed tuned for the old
+  sample rate when the host reactivated the plugin. The cache is invalidated
+  on every rate change, with 2/3/4-band round-trip regressions.
+- **Zero-frame meter blanking.** A host process call with zero frames no
+  longer clears the meters or band levels.
+- **Band selection and crossover validity.** Host automation, state loads and
+  presets now normalize an inactive band selection and crossed crossovers.
+- **Preset/state UI state.** Loading a state clears the preset label, solo
+  state and meter history, and requests a clean engine reset on the audio
+  thread.
+- **State migrations.** 0.1.0, 0.2.0 and 0.3.0 states load correctly:
+  - 0.2.0's three-band Low/Mid/High map to Low/Lo-Mid/High, its high
+    crossover becomes the 3-band Air split, and its -12..+12 dB output maps
+    onto the full-range Level.
+  - The old Shape/Scope/Off display list maps Off to the new fourth slot
+    instead of Spectrum.
+  - 0.3.0 states default to four bands; 0.1.0 starts with multiband defaults.
+- **Host text round-trips.** dB, percent, Hz/kHz, Off and band-count text now
+  parse back to the same parameter values, including per-band Level and
+  crossover text.
+- **Selected band across toggles.** Leaving and re-entering Multiband keeps
+  the selected active band.
+- **Crossover defaults.** The 2-band split is 900 Hz, and the Air crossover
+  accepts 800 Hz so 0.2.0 three-band states keep their high split.
+
 ## 0.4.0 — 2026-11-15
 
 ### Fixed

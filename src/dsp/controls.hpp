@@ -64,7 +64,7 @@ struct Controls {
   int selectedBand = 1;
   int soloBand = -1;
   float xover1 = 120.0f;  // Hz
-  float xover2 = 800.0f;  // Hz
+  float xover2 = 900.0f;  // Hz
   float xover3 = 5000.0f; // Hz
   float output = 0.5f;
   bool autoGain = false;

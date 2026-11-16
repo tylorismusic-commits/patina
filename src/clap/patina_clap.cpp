@@ -23,6 +23,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "dsp/saturation.hpp"
 #include "params.hpp"
@@ -87,6 +88,12 @@ public:
 
   double scale() const { return scale_.load(std::memory_order_relaxed); }
   UiSize size() const { return sizeForScale(scale()); }
+
+  // Host thread: the editor thread clears the preset label after a state load
+  // without touching PanelState from outside its thread.
+  void resetUiState() {
+    resetUi_.store(true, std::memory_order_relaxed);
+  }
 
   // Host thread: record the request only.  All Xlib calls happen on the
   // editor thread, because Xlib is not thread-safe and calling
@@ -227,6 +234,21 @@ private:
         XNextEvent(dpy, &ev);
         handleEvent(ev);
       }
+      if (resetUi_.exchange(false, std::memory_order_relaxed)) {
+        state_.presetIndex = -1;
+        state_.presetDirty = false;
+        state_.presetOpen = 0;
+        state_.presetScroll = 0;
+        state_.inLevel = state_.inLevelL = state_.inLevelR = -120.0f;
+        state_.outLevel = state_.outLevelL = state_.outLevelR = -120.0f;
+        state_.outPeakHold = -120.0f;
+        for (int b = 0; b < kBandCount; ++b) {
+          state_.bandLevel[b] = -120.0f;
+        }
+        for (int i = 0; i < kSpectrumBins; ++i) {
+          state_.spectrum[i] = -120.0f;
+        }
+      }
       panel_.tick(shared_, state_);
       cairo_save(cr);
       cairo_scale(cr, scale(), scale());
@@ -308,6 +330,7 @@ private:
   Panel panel_;
   std::atomic<double> scale_{1.0};
   std::atomic<bool> resizePending_{false};
+  std::atomic<bool> resetUi_{false};
   std::mutex mutex_;
   std::condition_variable cv_;
   Display* display_ = nullptr;
@@ -335,6 +358,7 @@ struct Plugin {
   std::atomic<uint32_t> reportedLatency{0xffffffffu};
   std::atomic<bool> rescanQueued{false};
   std::atomic<bool> active{false};
+  std::atomic<bool> resetEngine{false};
 };
 
 const clap_plugin_descriptor_t kDescriptor = {
@@ -456,7 +480,7 @@ bool paramsValueToText(const clap_plugin_t* p, clap_id id, double value,
     default:
       break;
   }
-  if (id >= P_B0_MODEL && id < P_COUNT) {
+  if (id >= P_B0_MODEL && id < P_BANDS) {
     const uint32_t offset = id - P_B0_MODEL;
     const BandField field = static_cast<BandField>(offset % BF_COUNT);
     switch (field) {
@@ -497,7 +521,7 @@ bool paramsValueToText(const clap_plugin_t* p, clap_id id, double value,
   return true;
 }
 
-bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
+bool paramsTextToValue(const clap_plugin_t* p, clap_id id, const char* text,
                        double* value) {
   if (!text) {
     return false;
@@ -511,6 +535,66 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
     }
     return false;
   };
+  auto hasDb = [&]() {
+    for (const char* c = text; *c; ++c) {
+      if ((c[0] == 'd' || c[0] == 'D') &&
+          (c[1] == 'b' || c[1] == 'B')) {
+        return true;
+      }
+    }
+    return false;
+  };
+  auto parseDb = [&](double* out) {
+    char* end = nullptr;
+    const double v = std::strtod(text, &end);
+    if (end == text) {
+      return false;
+    }
+    *out = hasDb() ? (v + 12.0) / 24.0 : (v > 1.0 ? (v + 12.0) / 24.0 : v);
+    return true;
+  };
+  auto parsePercent = [&](double* out) {
+    char* end = nullptr;
+    const double v = std::strtod(text, &end);
+    if (end == text) {
+      return false;
+    }
+    *out = (std::strchr(text, '%') != nullptr || v > 1.0) ? v / 100.0 : v;
+    return true;
+  };
+  auto parseHz = [&](double* out) {
+    char* end = nullptr;
+    double v = std::strtod(text, &end);
+    if (end == text) {
+      return false;
+    }
+    while (*end == ' ' || *end == '\t') {
+      ++end;
+    }
+    if (*end == 'k' || *end == 'K') {
+      v *= 1000.0;
+    }
+    *out = v;
+    return true;
+  };
+  auto parseLevel = [&](double* out) {
+    char* end = nullptr;
+    const double v = std::strtod(text, &end);
+    if (end == text) {
+      return false;
+    }
+    if (!hasDb() && v >= 0.0 && v <= 1.0) {
+      *out = v;
+    } else if (v <= -60.0) {
+      *out = 0.0;
+    } else if (v <= 0.0) {
+      *out = (v + 60.0) / 120.0;
+    } else {
+      *out = 0.5 + v / 24.0;
+    }
+    return true;
+  };
+
   double v = 0.0;
   switch (id) {
     case P_MODEL:
@@ -531,6 +615,26 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
         return true;
       }
       break;
+    case P_DRIVE:
+    case P_OUTPUT:
+      if (parseDb(value)) {
+        return true;
+      }
+      break;
+    case P_CHARACTER:
+    case P_TONE:
+    case P_MIX:
+      if (parsePercent(value)) {
+        return true;
+      }
+      break;
+    case P_XOVER1:
+    case P_XOVER2:
+    case P_XOVER3:
+      if (parseHz(value)) {
+        return true;
+      }
+      break;
     case P_METER:
       if (matchList(kMeterLabels, 4, &v)) {
         *value = v;
@@ -548,11 +652,22 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
         *value = v;
         return true;
       }
+      if (strcasecmp(text, "Mid") == 0) {
+        *value = activeBandSlot(bandCount(self(p)->shared), 1);
+        return true;
+      }
+      break;
+    case P_BANDS:
+      if (matchList(kBandCountLabels, 3, &v)) {
+        *value = v + 2.0;
+        return true;
+      }
       break;
     default:
       break;
   }
-  if (id >= P_B0_MODEL && id < P_COUNT) {
+
+  if (id >= P_B0_MODEL && id < P_BANDS) {
     const uint32_t offset = id - P_B0_MODEL;
     const BandField field = static_cast<BandField>(offset % BF_COUNT);
     if (field == BF_MODEL &&
@@ -560,7 +675,7 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
       *value = v;
       return true;
     }
-    if (field == BF_ON || field == BF_LEVEL) {
+    if (field == BF_ON) {
       if (strcasecmp(text, "On") == 0) {
         *value = 1.0;
         return true;
@@ -570,7 +685,27 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
         return true;
       }
     }
+    if (field == BF_INPUT || field == BF_DRIVE) {
+      if (parseDb(value)) {
+        return true;
+      }
+    }
+    if (field == BF_CHARACTER || field == BF_TONE || field == BF_MIX) {
+      if (parsePercent(value)) {
+        return true;
+      }
+    }
+    if (field == BF_LEVEL) {
+      if (strcasecmp(text, "Off") == 0) {
+        *value = 0.0;
+        return true;
+      }
+      if (parseLevel(value)) {
+        return true;
+      }
+    }
   }
+
   char* end = nullptr;
   v = std::strtod(text, &end);
   if (end == text) {
@@ -597,6 +732,11 @@ void applyEvents(Plugin* s, const clap_input_events_t* in) {
       }
     }
   }
+  // Keep host-driven band counts, selections and crossovers in a valid
+  // arrangement.  This uses setFromHost, so it does not echo back as a UI
+  // change.
+  normalizeBandSelection(s->shared);
+  normalizeCrossovers(s->shared);
 }
 
 // Sends the values the editor changed back to the host, so they can be
@@ -678,12 +818,58 @@ bool stateSave(const clap_plugin_t* p, const clap_ostream_t* stream) {
 bool stateLoad(const clap_plugin_t* p, const clap_istream_t* stream) {
   Plugin* s = self(p);
   uint32_t header[4] = {};
-  const int64_t gotHeader = stream->read(stream, header, sizeof(header));
-  if (gotHeader != static_cast<int64_t>(sizeof(header))) {
+  if (stream->read(stream, header, sizeof(header)) !=
+      static_cast<int64_t>(sizeof(header))) {
     return false;
   }
 
+  auto migrateOldMeter = [](double v) {
+    const int m = std::clamp(static_cast<int>(v + 0.5), 0, 2);
+    return m == 2 ? 3.0 : static_cast<double>(m);
+  };
+  // 0.2.0's per-band output ran -12..+12 dB; the current Level runs
+  // silence..0..+12.  Preserve the old dB value for -12..+12.
+  auto migrateOldOutput = [](double v) {
+    return v <= 0.5 ? 0.4 + 0.2 * v : v;
+  };
+
+  // Patina 0.2.0 had three bands with the band block one id earlier.  Map its
+  // Low/Mid/High slots to the current Low/Lo-Mid/High slots and select the
+  // matching 3-band layout.
+  auto applyThreeBand = [&](const double* values) {
+    for (uint32_t i = 0; i < 13; ++i) {
+      s->shared.setFromHost(i, values[i]);
+    }
+    s->shared.setFromHost(P_METER, migrateOldMeter(values[P_METER]));
+    const double oldHigh = values[P_XOVER2];
+    const int oldBand =
+        std::clamp(static_cast<int>(values[13] + 0.5), 0, 2);
+    s->shared.setFromHost(P_BAND, oldBand == 0 ? 0 : (oldBand == 1 ? 1 : 3));
+    for (int band = 0; band < 3; ++band) {
+      const int slot = band == 2 ? 3 : band;
+      for (uint32_t field = 0; field < BF_COUNT; ++field) {
+        double v = values[14 + band * BF_COUNT + field];
+        if (field == BF_LEVEL) {
+          v = migrateOldOutput(v);
+        }
+        s->shared.setFromHost(
+            bandParam(slot, static_cast<BandField>(field)), v);
+      }
+    }
+    s->shared.setFromHost(P_BANDS, 3.0);
+    // The old three-band split was xover1/xover2.  The current 3-band layout
+    // uses xover1/xover3, so move the old high split to Air and choose a
+    // valid 4-band middle split for later.
+    s->shared.setFromHost(P_XOVER3, oldHigh);
+    double mid = std::min(kParamSpecs[P_XOVER2].def, oldHigh - 100.0);
+    mid = std::min(std::max(mid, kParamSpecs[P_XOVER2].min),
+                   kParamSpecs[P_XOVER2].max);
+    s->shared.setFromHost(P_XOVER2, mid);
+  };
+
   double scale = 0.0;
+  bool haveScale = false;
+  bool hasBandData = true;
   if (header[0] == kStateMagic) {
     if (header[1] < 2 || header[1] > kStateVersion || header[2] > 64) {
       return false;
@@ -694,40 +880,84 @@ bool stateLoad(const clap_plugin_t* p, const clap_istream_t* stream) {
         static_cast<int64_t>(count * sizeof(double))) {
       return false;
     }
+    hasBandData = count > P_MB;
     if (header[1] == 2 && count == 38) {
-      // Patina 0.2.0 had three bands and no Air crossover.  Its band base
-      // sat one id earlier; shift the old band block into the 4-band layout.
-      for (uint32_t i = 0; i < count; ++i) {
-        if (i < 13) {
-          s->shared.setFromHost(i, values[i]);
-        } else if (i == 13) {
-          s->shared.setFromHost(P_BAND, values[i]);
-        } else {
-          s->shared.setFromHost(i + 1, values[i]);
-        }
-      }
+      applyThreeBand(values);
     } else {
       for (uint32_t i = 0; i < count && i < P_COUNT; ++i) {
         s->shared.setFromHost(i, values[i]);
       }
+      if (header[1] == 2 && count == 47) {
+        // The old display list was Shape/Scope/Off; Spectrum was added later.
+        s->shared.setFromHost(P_METER, migrateOldMeter(values[P_METER]));
+      }
+      if (count < P_COUNT) {
+        // 0.3.0 did not have a band-count parameter.
+        s->shared.setFromHost(P_BANDS, kParamSpecs[P_BANDS].def);
+      }
     }
+    haveScale =
+        stream->read(stream, &scale, sizeof(scale)) ==
+        static_cast<int64_t>(sizeof(scale));
   } else {
-    // Patina 0.1.0 wrote ten doubles + scale with no header.  The two doubles
-    // already read as the header are the first two legacy values.
-    double legacy[10] = {};
-    std::memcpy(legacy, header, sizeof(header));
-    if (stream->read(stream, legacy + 2, 8 * sizeof(double)) !=
-        static_cast<int64_t>(8 * sizeof(double))) {
+    // Pre-header states: 0.1.0 wrote ten doubles + scale, 0.2.0 wrote
+    // thirty-eight doubles + scale.  Read to the end so the size identifies
+    // the format.
+    std::vector<unsigned char> rest;
+    unsigned char chunk[512];
+    while (true) {
+      const int64_t n = stream->read(stream, chunk, sizeof(chunk));
+      if (n <= 0) {
+        break;
+      }
+      rest.insert(rest.end(), chunk, chunk + n);
+    }
+    const size_t total = sizeof(header) + rest.size();
+    if (total == 88) {
+      // 10 values + scale.
+      double values[10] = {};
+      std::memcpy(values, header, sizeof(header));
+      std::memcpy(values + 2, rest.data(), 8 * sizeof(double));
+      std::memcpy(&scale, rest.data() + 8 * sizeof(double), sizeof(scale));
+      haveScale = true;
+      for (uint32_t i = 0; i < 10; ++i) {
+        s->shared.setFromHost(i, values[i]);
+      }
+      s->shared.setFromHost(P_METER, migrateOldMeter(values[P_METER]));
+      // Everything added after 0.1.0 starts at its default.
+      for (uint32_t i = 10; i < P_COUNT; ++i) {
+        s->shared.setFromHost(i, kParamSpecs[i].def);
+      }
+      hasBandData = false;
+    } else if (total == 312) {
+      // 38 values + scale (0.2.0, three bands).
+      double values[38] = {};
+      std::memcpy(values, header, sizeof(header));
+      std::memcpy(values + 2, rest.data(), 36 * sizeof(double));
+      std::memcpy(&scale, rest.data() + 36 * sizeof(double), sizeof(scale));
+      haveScale = true;
+      applyThreeBand(values);
+    } else {
       return false;
     }
-    for (uint32_t i = 0; i < 10; ++i) {
-      s->shared.setFromHost(i, legacy[i]);
-    }
   }
+
+  normalizeLoadedState(s->shared, hasBandData);
+  s->shared.inPeakL.store(-120.0f, std::memory_order_relaxed);
+  s->shared.inPeakR.store(-120.0f, std::memory_order_relaxed);
+  s->shared.outPeakL.store(-120.0f, std::memory_order_relaxed);
+  s->shared.outPeakR.store(-120.0f, std::memory_order_relaxed);
+  s->shared.outVu.store(-120.0f, std::memory_order_relaxed);
+  for (int b = 0; b < kBandCount; ++b) {
+    s->shared.bandLevel[b].store(-120.0f, std::memory_order_relaxed);
+  }
+  for (int i = 0; i < kSpectrumBins; ++i) {
+    s->shared.spectrum[i].store(-120.0f, std::memory_order_relaxed);
+  }
+  s->resetEngine.store(true, std::memory_order_relaxed);
+  s->editor.resetUiState();
   noteHostChanges(s);
-  if (stream->read(stream, &scale, sizeof(scale)) ==
-          static_cast<int64_t>(sizeof(scale)) &&
-      scale > 0.0) {
+  if (haveScale && scale > 0.0) {
     s->editor.resize(scale);
   }
   return true;
@@ -910,21 +1140,26 @@ clap_process_status pluginProcess(const clap_plugin_t* p, const clap_process_t* 
     std::memcpy(right, inR, frames * sizeof(float));
   }
 
-  s->engine.setControls(controlsFrom(s->shared));
-  s->engine.process(left, right, static_cast<int>(frames), s->meters);
-
-  s->shared.inPeakL.store(s->meters.inPeakL, std::memory_order_relaxed);
-  s->shared.inPeakR.store(s->meters.inPeakR, std::memory_order_relaxed);
-  s->shared.outPeakL.store(s->meters.outPeakL, std::memory_order_relaxed);
-  s->shared.outPeakR.store(s->meters.outPeakR, std::memory_order_relaxed);
-  s->shared.outVu.store(s->meters.outVu, std::memory_order_relaxed);
-  for (int b = 0; b < kBandCount; ++b) {
-    s->shared.bandLevel[b].store(s->meters.bandLevel[b],
-                                 std::memory_order_relaxed);
+  if (s->resetEngine.exchange(false, std::memory_order_relaxed)) {
+    s->engine.reset();
   }
-  const float* spectrum = s->engine.spectrumBins();
-  for (int i = 0; i < kSpectrumBins; ++i) {
-    s->shared.spectrum[i].store(spectrum[i], std::memory_order_relaxed);
+  s->engine.setControls(controlsFrom(s->shared));
+  if (frames > 0) {
+    s->engine.process(left, right, static_cast<int>(frames), s->meters);
+
+    s->shared.inPeakL.store(s->meters.inPeakL, std::memory_order_relaxed);
+    s->shared.inPeakR.store(s->meters.inPeakR, std::memory_order_relaxed);
+    s->shared.outPeakL.store(s->meters.outPeakL, std::memory_order_relaxed);
+    s->shared.outPeakR.store(s->meters.outPeakR, std::memory_order_relaxed);
+    s->shared.outVu.store(s->meters.outVu, std::memory_order_relaxed);
+    for (int b = 0; b < kBandCount; ++b) {
+      s->shared.bandLevel[b].store(s->meters.bandLevel[b],
+                                   std::memory_order_relaxed);
+    }
+    const float* spectrum = s->engine.spectrumBins();
+    for (int i = 0; i < kSpectrumBins; ++i) {
+      s->shared.spectrum[i].store(spectrum[i], std::memory_order_relaxed);
+    }
   }
   noteHostChanges(s);
   return CLAP_PROCESS_CONTINUE;

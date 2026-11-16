@@ -248,17 +248,41 @@ public:
     if (!deferOversample_ && factor != factor_) {
       configure(factor);
     }
+    const int previousBands = controls_.bandCount;
+    const bool previousMultiband = controls_.multiband;
     controls_ = c;
     controls_.bandCount = std::min(std::max(c.bandCount, 2), 4);
-    controls_.selectedBand =
-        std::min(std::max(c.selectedBand, 0), controls_.bandCount - 1);
+    int selected =
+        std::min(std::max(c.selectedBand, 0), 3);
+    if (activeBandIndex(controls_.bandCount, selected) < 0) {
+      selected = activeBandSlot(controls_.bandCount,
+                                controls_.bandCount >= 3 ? 1 : 0);
+    }
+    controls_.selectedBand = selected;
     if (controls_.soloBand >= 0 &&
         activeBandIndex(controls_.bandCount, controls_.soloBand) < 0) {
       controls_.soloBand = -1;
     }
+    if (controls_.bandCount != previousBands ||
+        controls_.multiband != previousMultiband) {
+      // Structural change: clear stale filter history from the previous
+      // band layout without touching the parameter smoothers.
+      for (BandSaturator& b : bands_) {
+        b.reset();
+      }
+      for (hdsp::LinkwitzRiley4& xo : xover2_) {
+        xo.reset();
+      }
+      for (hdsp::ThreeBandCrossover& xo : xover3_) {
+        xo.reset();
+      }
+      for (hdsp::FourBandCrossover& xo : xover4_) {
+        xo.reset();
+      }
+    }
     controls_.xover1 = std::min(std::max(c.xover1, 40.0f), 800.0f);
     controls_.xover2 = std::min(std::max(c.xover2, 200.0f), 6000.0f);
-    controls_.xover3 = std::min(std::max(c.xover3, 1000.0f), 16000.0f);
+    controls_.xover3 = std::min(std::max(c.xover3, 800.0f), 16000.0f);
     if (controls_.xover2 < controls_.xover1 + 20.0f) {
       controls_.xover2 = controls_.xover1 + 20.0f;
     }
@@ -282,6 +306,9 @@ public:
   const float* spectrumBins() const noexcept { return spectrum_.bins(); }
 
   void process(float* left, float* right, int frames, Meters& meters) noexcept {
+    if (frames <= 0) {
+      return;
+    }
     // Analyse the unprocessed input so the editor has something to show even
     // when the bands are faded out.
     spectrum_.push(left, right, frames);
@@ -513,7 +540,7 @@ private:
   hdsp::SpectrumAnalyzer spectrum_;
   hdsp::Smoothed outputSmooth_;
   float xover1Cur_ = 120.0f;
-  float xover2Cur_ = 800.0f;
+  float xover2Cur_ = 900.0f;
   float xover3Cur_ = 5000.0f;
   float xover1Applied_ = -1.0f;
   float xover2Applied_ = -1.0f;

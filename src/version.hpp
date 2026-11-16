@@ -5,6 +5,6 @@
 namespace patina {
 constexpr int kVersionMajor = 0;
 constexpr int kVersionMinor = 4;
-constexpr int kVersionMicro = 0;
-constexpr const char* kVersion = "0.4.0";
+constexpr int kVersionMicro = 1;
+constexpr const char* kVersion = "0.4.1";
 } // namespace patina

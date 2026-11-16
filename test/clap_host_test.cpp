@@ -394,6 +394,226 @@ int main(int argc, char** argv) {
   params->get_value(plugin, patina::P_DRIVE, &value);
   check(std::fabs(value - 0.7) < 1e-9, "state restore brings back drive");
 
+  auto setParam = [&](uint32_t id, double v) {
+    events.inputs.push_back(paramEvent(id, v));
+    clap_input_events_t in{&events, inSize, inGet};
+    params->flush(plugin, &in, nullptr);
+    events.inputs.clear();
+  };
+  auto paramValue = [&](uint32_t id) {
+    double v = 0.0;
+    params->get_value(plugin, id, &v);
+    return v;
+  };
+
+  // Multiband state round-trip, including band count and the selected band.
+  {
+    setParam(patina::P_MB, 1.0);
+    setParam(patina::P_BANDS, 3.0);
+    setParam(patina::P_BAND, 3.0);
+    setParam(patina::P_XOVER1, 100.0);
+    setParam(patina::P_XOVER2, 900.0);
+    setParam(patina::P_XOVER3, 6000.0);
+    setParam(patina::bandParam(0, patina::BF_MODEL), 4.0);
+    setParam(patina::bandParam(0, patina::BF_DRIVE), 0.61);
+    setParam(patina::bandParam(1, patina::BF_LEVEL), 0.25);
+    setParam(patina::bandParam(3, patina::BF_MODEL), 1.0);
+    setParam(patina::P_METER, 2.0);
+    MemStream mbSaved;
+    clap_ostream_t mbOut{&mbSaved, streamWrite};
+    check(state->save(plugin, &mbOut), "multiband state saves");
+
+    setParam(patina::P_MB, 0.0);
+    setParam(patina::P_BANDS, 4.0);
+    setParam(patina::P_BAND, 0.0);
+    setParam(patina::bandParam(0, patina::BF_MODEL), 0.0);
+    setParam(patina::bandParam(0, patina::BF_DRIVE), 0.2);
+    setParam(patina::bandParam(1, patina::BF_LEVEL), 0.8);
+    setParam(patina::bandParam(3, patina::BF_MODEL), 0.0);
+
+    MemStream mbBack;
+    mbBack.data = mbSaved.data;
+    clap_istream_t mbIn{&mbBack, streamRead};
+    check(state->load(plugin, &mbIn), "multiband state loads");
+    check(paramValue(patina::P_MB) == 1.0 &&
+              paramValue(patina::P_BANDS) == 3.0 &&
+              paramValue(patina::P_BAND) == 3.0,
+          "multiband state restores mode, count and band");
+    check(paramValue(patina::bandParam(0, patina::BF_MODEL)) == 4.0 &&
+              std::fabs(paramValue(patina::bandParam(0, patina::BF_DRIVE)) -
+                        0.61) < 1e-9,
+          "multiband state restores band settings");
+    check(std::fabs(paramValue(patina::bandParam(1, patina::BF_LEVEL)) -
+                    0.25) < 1e-9 &&
+              paramValue(patina::bandParam(3, patina::BF_MODEL)) == 1.0,
+          "multiband state restores level and high band");
+    check(paramValue(patina::P_METER) == 2.0,
+          "new state keeps the Spectrum display slot");
+  }
+
+  // 0.2.0 wrote 38 raw doubles + scale with no header and used Low/Mid/High
+  // slots 0/1/2.  It should load into the current 3-band layout.
+  {
+    double vals[39] = {};
+    vals[0] = 3;   // model
+    vals[1] = 1;   // power
+    vals[2] = 0.8; // drive
+    vals[3] = 0.5;
+    vals[4] = 0.5;
+    vals[5] = 1.0;
+    vals[6] = 0.5;
+    vals[7] = 0.0;
+    vals[8] = 2.0;   // old display: Off
+    vals[9] = 0.0;
+    vals[10] = 1.0;  // multiband
+    vals[11] = 120.0;
+    vals[12] = 900.0;
+    vals[13] = 2.0;  // selected High
+    vals[14] = 4.0;  // old low model
+    vals[15] = 0.5;
+    vals[16] = 0.6;  // old low drive
+    vals[17] = 0.5;
+    vals[18] = 0.5;
+    vals[19] = 1.0;
+    vals[20] = 0.25;  // old -6 dB output
+    vals[21] = 1.0;
+    vals[22] = 0.0;  // old mid model
+    vals[23] = 0.5;
+    vals[24] = 0.5;
+    vals[25] = 0.5;
+    vals[26] = 0.5;
+    vals[27] = 1.0;
+    vals[28] = 0.5;
+    vals[29] = 1.0;
+    vals[30] = 1.0;  // old high model
+    vals[31] = 0.5;
+    vals[32] = 0.5;
+    vals[33] = 0.5;
+    vals[34] = 0.5;
+    vals[35] = 1.0;
+    vals[36] = 0.5;
+    vals[37] = 1.0;
+    vals[38] = 1.0;  // UI scale
+    MemStream legacy;
+    legacy.data.resize(sizeof(vals));
+    std::memcpy(legacy.data.data(), vals, sizeof(vals));
+    clap_istream_t legacyIn{&legacy, streamRead};
+    check(state->load(plugin, &legacyIn), "0.2.0 raw state loads");
+    check(paramValue(patina::P_MODEL) == 3.0 &&
+              std::fabs(paramValue(patina::P_DRIVE) - 0.8) < 1e-9 &&
+              paramValue(patina::P_BANDS) == 3.0 &&
+              paramValue(patina::P_BAND) == 3.0,
+          "0.2.0 state maps to the 3-band layout");
+    check(paramValue(patina::bandParam(0, patina::BF_MODEL)) == 4.0 &&
+              std::fabs(paramValue(patina::bandParam(0, patina::BF_DRIVE)) -
+                        0.6) < 1e-9 &&
+              paramValue(patina::bandParam(1, patina::BF_MODEL)) == 0.0 &&
+              paramValue(patina::bandParam(3, patina::BF_MODEL)) == 1.0 &&
+              paramValue(patina::bandParam(3, patina::BF_ON)) == 1.0,
+          "0.2.0 band settings move to Low/Mid/High slots");
+    check(std::fabs(paramValue(patina::P_XOVER3) - 900.0) < 1e-9,
+          "0.2.0 high crossover becomes the 3-band air crossover");
+    check(paramValue(patina::P_METER) == 3.0,
+          "0.2.0 Off display maps to the new Off slot");
+    check(std::fabs(paramValue(patina::bandParam(0, patina::BF_LEVEL)) -
+                    0.45) < 1e-9,
+          "0.2.0 output maps onto the full-range Level");
+  }
+
+  // 0.3.0 had a header but no band-count parameter, and its display list was
+  // Shape/Scope/Off.  It must default to four bands and map Off to the new
+  // Off slot.
+  {
+    std::vector<unsigned char> raw(16 + 47 * 8 + 8);
+    uint32_t hdr[4] = {0x50544E41u, 2u, 47u, 0u};
+    double vals[47];
+    for (int i = 0; i < 47; ++i) {
+      vals[i] = patina::kParamSpecs[i].def;
+    }
+    vals[patina::P_METER] = 2.0;
+    vals[patina::P_MB] = 1.0;
+    vals[patina::P_DRIVE] = 0.7;
+    vals[patina::P_BAND] = 1.0;
+    vals[patina::P_XOVER3] = 5500.0;
+    const double scale = 1.0;
+    std::memcpy(raw.data(), hdr, sizeof(hdr));
+    std::memcpy(raw.data() + 16, vals, sizeof(vals));
+    std::memcpy(raw.data() + 16 + sizeof(vals), &scale, sizeof(scale));
+    MemStream v03;
+    v03.data = raw;
+    clap_istream_t v03In{&v03, streamRead};
+    check(state->load(plugin, &v03In), "0.3.0 state loads");
+    check(paramValue(patina::P_METER) == 3.0 &&
+              paramValue(patina::P_BANDS) == 4.0 &&
+              paramValue(patina::P_MB) == 1.0,
+          "0.3.0 state gets four bands and the new Off slot");
+    check(std::fabs(paramValue(patina::P_DRIVE) - 0.7) < 1e-9 &&
+              std::fabs(paramValue(patina::P_XOVER3) - 5500.0) < 1e-9,
+          "0.3.0 state keeps its parameters");
+  }
+
+  // 0.1.0 wrote ten raw doubles + scale.  The new multiband/band state must
+  // start at defaults, and the old Off display maps to the new Off slot.
+  {
+    double vals[11] = {};
+    vals[0] = 3.0;
+    vals[1] = 1.0;
+    vals[2] = 0.8;
+    vals[3] = 0.5;
+    vals[4] = 0.5;
+    vals[5] = 1.0;
+    vals[6] = 0.5;
+    vals[7] = 0.0;
+    vals[8] = 2.0;
+    vals[9] = 0.0;
+    vals[10] = 1.0;
+    MemStream v01;
+    v01.data.resize(sizeof(vals));
+    std::memcpy(v01.data.data(), vals, sizeof(vals));
+    clap_istream_t v01In{&v01, streamRead};
+    check(state->load(plugin, &v01In), "0.1.0 raw state loads");
+    check(paramValue(patina::P_MODEL) == 3.0 &&
+              std::fabs(paramValue(patina::P_DRIVE) - 0.8) < 1e-9 &&
+              paramValue(patina::P_METER) == 3.0 &&
+              paramValue(patina::P_MB) == 0.0 &&
+              paramValue(patina::P_BANDS) == 4.0,
+          "0.1.0 state keeps its sound and starts multiband at defaults");
+    check(std::fabs(paramValue(patina::bandParam(0, patina::BF_LEVEL)) -
+                    0.5) < 1e-9,
+          "0.1.0 state uses the default band level");
+  }
+
+  // Loading an invalid arrangement must be normalized, not left crossed.
+  {
+    std::vector<unsigned char> raw(16 + patina::P_COUNT * 8 + 8);
+    uint32_t hdr[4] = {0x50544E41u, 4u, patina::P_COUNT, 0u};
+    double vals[patina::P_COUNT];
+    for (int i = 0; i < patina::P_COUNT; ++i) {
+      vals[i] = patina::kParamSpecs[i].def;
+    }
+    vals[patina::P_MB] = 1.0;
+    vals[patina::P_BANDS] = 3.0;
+    vals[patina::P_BAND] = 2.0;
+    vals[patina::P_XOVER1] = 800.0;
+    vals[patina::P_XOVER2] = 200.0;
+    vals[patina::P_XOVER3] = 1000.0;
+    const double scale = 1.0;
+    std::memcpy(raw.data(), hdr, sizeof(hdr));
+    std::memcpy(raw.data() + 16, vals, sizeof(vals));
+    std::memcpy(raw.data() + 16 + sizeof(vals), &scale, sizeof(scale));
+    MemStream odd;
+    odd.data = raw;
+    clap_istream_t oddIn{&odd, streamRead};
+    check(state->load(plugin, &oddIn), "state with an invalid layout loads");
+    check(paramValue(patina::P_BAND) == 1.0,
+          "inactive band selection normalizes to an active slot");
+    check(paramValue(patina::P_XOVER2) >=
+              paramValue(patina::P_XOVER1) + 20.0 &&
+              paramValue(patina::P_XOVER3) >=
+                  paramValue(patina::P_XOVER2) + 100.0,
+          "crossovers normalize to a valid order");
+  }
+
   // Host-facing text must be readable, not bare numbers.
   {
     char buf[128] = {0};
@@ -417,6 +637,44 @@ int main(int argc, char** argv) {
     check(std::strcmp(buf, "High") == 0, "band selection reads as a name");
     params->value_to_text(plugin, patina::P_BANDS, 3.0, buf, sizeof(buf));
     check(std::strcmp(buf, "3 Bands") == 0, "band count reads as a mode");
+
+    double parsed = 0.0;
+    check(params->text_to_value(plugin, patina::P_DRIVE, "+0.0 dB", &parsed) &&
+              std::fabs(parsed - 0.5) < 1e-9,
+          "drive dB text round-trips");
+    check(params->text_to_value(plugin, patina::P_CHARACTER, "50%", &parsed) &&
+              std::fabs(parsed - 0.5) < 1e-9,
+          "character percent text round-trips");
+    check(params->text_to_value(plugin, patina::P_XOVER3, "5.0 kHz", &parsed) &&
+              std::fabs(parsed - 5000.0) < 1e-9,
+          "crossover kHz text round-trips");
+    check(params->text_to_value(plugin, patina::bandParam(1, patina::BF_LEVEL),
+                                "+6.0 dB", &parsed) &&
+              std::fabs(parsed - 0.75) < 1e-9,
+          "band level dB text round-trips");
+    check(params->text_to_value(plugin, patina::bandParam(1, patina::BF_LEVEL),
+                                "Off", &parsed) &&
+              std::fabs(parsed) < 1e-9,
+          "band level Off text round-trips");
+    check(params->text_to_value(plugin, patina::bandParam(1, patina::BF_INPUT),
+                                "+3.0 dB", &parsed) &&
+              std::fabs(parsed - 0.625) < 1e-9,
+          "band input dB text round-trips");
+    check(params->text_to_value(plugin, patina::P_BANDS, "3 Bands", &parsed) &&
+              std::fabs(parsed - 3.0) < 1e-9,
+          "band count text round-trips");
+    params->value_to_text(plugin, patina::P_METER, 2.0, buf, sizeof(buf));
+    check(std::strcmp(buf, "Spectrum") == 0,
+          "Spectrum display reads as a mode");
+    check(params->text_to_value(plugin, patina::P_METER, "Spectrum", &parsed) &&
+              std::fabs(parsed - 2.0) < 1e-9,
+          "Spectrum display text round-trips");
+    check(params->text_to_value(plugin, patina::P_METER, "Off", &parsed) &&
+              std::fabs(parsed - 3.0) < 1e-9,
+          "Off display maps to the fourth slot");
+    check(params->text_to_value(plugin, patina::P_BAND, "Mid", &parsed) &&
+              std::fabs(parsed - 1.0) < 1e-9,
+          "band Mid text maps to the Mid slot");
     params->value_to_text(plugin, patina::bandParam(1, patina::BF_LEVEL), 0.0,
                           buf, sizeof(buf));
     check(std::strcmp(buf, "Off") == 0, "band level reaches off");
@@ -424,6 +682,14 @@ int main(int argc, char** argv) {
                           buf, sizeof(buf));
     check(std::strcmp(buf, "+6.0 dB") == 0, "band level reads as dB");
   }
+
+  // Put the plugin back in a known single-band state before the editor test.
+  setParam(patina::P_MB, 0.0);
+  setParam(patina::P_BANDS, 4.0);
+  setParam(patina::P_MODEL, 0.0);
+  setParam(patina::P_DRIVE, 0.45);
+  setParam(patina::P_TONE, 0.50);
+  setParam(patina::P_MIX, 1.0);
 
   // Editor on the current display, if there is one.
   if (gui) {
@@ -575,6 +841,7 @@ int main(int argc, char** argv) {
       };
 
       setParam(patina::P_MB, 1.0);
+      setParam(patina::P_BANDS, 4.0);
       setParam(patina::P_BAND, 1.0);
       setParam(patina::P_XOVER1, 120.0);
       setParam(patina::P_XOVER2, 900.0);
@@ -617,6 +884,8 @@ int main(int argc, char** argv) {
             "leaving multiband carries the selected band to single");
       click(815, 32);
       check(paramValue(patina::P_MB) == 1.0, "multiband toggles back on");
+      check(paramValue(patina::P_BAND) == 0.0,
+            "multiband keeps the selected band across the toggle");
 
       // Fourth band and the full-range Level knob.
       click(624, 354);

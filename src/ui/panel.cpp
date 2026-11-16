@@ -1386,14 +1386,22 @@ bool Panel::pointerMove(Shared& shared, PanelState& state, double x, double y,
   const uint32_t param = static_cast<uint32_t>(dragParam_);
   if (dragCrossover_) {
     const double hz = xToFreq(x, displayX_, displayW_);
+    const double x1 =
+        std::min(std::max(shared.get(P_XOVER1), 40.0), 800.0);
+    const double x2 =
+        std::min(std::max(shared.get(P_XOVER2), 200.0), 6000.0);
+    const double x3 =
+        std::min(std::max(shared.get(P_XOVER3), 800.0), 16000.0);
     if (param == P_XOVER1) {
-      shared.set(param, std::min(hz, shared.get(P_XOVER2) - 20.0));
-    } else if (param == P_XOVER2) {
       shared.set(param,
-                 std::max(shared.get(P_XOVER1) + 20.0,
-                          std::min(hz, shared.get(P_XOVER3) - 100.0)));
+                 std::min(std::max(hz, 40.0), std::min(800.0, x2 - 20.0)));
+    } else if (param == P_XOVER2) {
+      shared.set(param, std::min(std::max(hz, std::max(200.0, x1 + 20.0)),
+                                 std::min(6000.0, x3 - 100.0)));
     } else {
-      shared.set(param, std::max(hz, shared.get(P_XOVER2) + 100.0));
+      shared.set(param,
+                 std::min(std::max(hz, std::max(800.0, x2 + 100.0)),
+                          16000.0));
     }
     state.presetDirty = true;
     return true;
@@ -1544,6 +1552,8 @@ void Panel::applyPreset(Shared& shared, PanelState& state, int index) const {
       shared.set(static_cast<uint32_t>(v.param), v.value);
     }
   }
+  normalizeBandSelection(shared);
+  normalizeCrossovers(shared);
   state.presetIndex = index;
   state.presetDirty = false;
   state.presetOpen = 0;

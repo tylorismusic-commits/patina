@@ -155,9 +155,9 @@ inline constexpr ParamSpec kParamSpecs[P_COUNT] = {
      {}},
     {"xover_low", "Low Xover", "Multiband", 40.0, 800.0, 120.0, false, false,
      false, "Hz", {}},
-    {"xover_high", "High Xover", "Multiband", 200.0, 6000.0, 800.0, false,
+    {"xover_high", "High Xover", "Multiband", 200.0, 6000.0, 900.0, false,
      false, false, "Hz", {}},
-    {"xover_air", "Air Xover", "Multiband", 1000.0, 16000.0, 5000.0, false,
+    {"xover_air", "Air Xover", "Multiband", 800.0, 16000.0, 5000.0, false,
      false, false, "Hz", {}},
     {"band", "Band", "Multiband", 0.0, 3.0, 1.0, true, true, false, nullptr,
      labels(kBandLabels)},
@@ -262,6 +262,44 @@ inline int bandCount(const Shared& s) noexcept {
   return std::min(std::max(static_cast<int>(s.get(P_BANDS) + 0.5), 2), 4);
 }
 
+inline void normalizeBandSelection(Shared& s) noexcept {
+  const int count = bandCount(s);
+  const int slot =
+      std::min(std::max(static_cast<int>(s.get(P_BAND) + 0.5), 0), 3);
+  if (activeBandIndex(count, slot) < 0) {
+    s.setFromHost(P_BAND, activeBandSlot(count, count >= 3 ? 1 : 0));
+  }
+  const int solo = s.soloBand.load(std::memory_order_relaxed);
+  if (solo >= 0 && activeBandIndex(count, solo) < 0) {
+    s.soloBand.store(-1, std::memory_order_relaxed);
+  }
+}
+
+inline void normalizeCrossovers(Shared& s) noexcept {
+  double x1 = std::min(std::max(s.get(P_XOVER1), 40.0), 800.0);
+  double x2 = std::min(std::max(s.get(P_XOVER2), 200.0), 6000.0);
+  double x3 = std::min(std::max(s.get(P_XOVER3), 800.0), 16000.0);
+  if (x2 < x1 + 20.0) {
+    x2 = std::min(6000.0, x1 + 20.0);
+  }
+  if (x3 < x2 + 100.0) {
+    x3 = std::min(16000.0, x2 + 100.0);
+  }
+  s.setFromHost(P_XOVER1, x1);
+  s.setFromHost(P_XOVER2, x2);
+  s.setFromHost(P_XOVER3, x3);
+}
+
+inline void normalizeLoadedState(Shared& s, bool hasBandData = true) noexcept {
+  s.soloBand.store(-1, std::memory_order_relaxed);
+  // A state that carries per-band values should restore them when Multiband
+  // is switched on later; only a single-band-only state seeds from the
+  // current sound.
+  s.mbSeeded.store(hasBandData, std::memory_order_relaxed);
+  normalizeBandSelection(s);
+  normalizeCrossovers(s);
+}
+
 inline const char* bandLabelForCount(int count, int band) noexcept {
   static const char* const kTwo[] = {"Low", "High"};
   static const char* const kThree[] = {"Low", "Mid", "High"};
@@ -347,7 +385,11 @@ inline void enterMultiband(Shared& s) {
     }
   }
   const int count = bandCount(s);
-  s.set(P_BAND, activeBandSlot(count, count >= 3 ? 1 : 0));
+  int slot = std::min(std::max(static_cast<int>(s.get(P_BAND) + 0.5), 0), 3);
+  if (activeBandIndex(count, slot) < 0) {
+    slot = activeBandSlot(count, count >= 3 ? 1 : 0);
+    s.set(P_BAND, slot);
+  }
   s.set(P_MB, 1.0);
   s.soloBand.store(-1, std::memory_order_relaxed);
 }

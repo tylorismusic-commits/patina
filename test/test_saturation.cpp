@@ -391,6 +391,28 @@ int main() {
     check(rp < 1.0e-10, "multiband keeps L/R separate");
   }
 
+  // A zero-frame process (hosts do this for parameter changes) must not
+  // blank the meters.
+  {
+    SaturationEngine engine;
+    engine.prepare(kSr);
+    engine.setControls(multiControls(0));
+    Meters meters;
+    std::vector<float> l(256), r(256);
+    for (int b = 0; b < 80; ++b) {
+      for (int i = 0; i < 256; ++i) {
+        const float t = static_cast<float>(b * 256 + i) / kSr;
+        l[i] = r[i] = 0.25f * std::sin(2.0f * 3.14159265f * 500.0f * t);
+      }
+      engine.process(l.data(), r.data(), 256, meters);
+    }
+    const float outPeak = meters.outPeakL;
+    const float lowBand = meters.bandLevel[0];
+    engine.process(l.data(), r.data(), 0, meters);
+    check(meters.outPeakL == outPeak && meters.bandLevel[0] == lowBand,
+          "zero-frame process keeps the last meter values");
+  }
+
   // Power bypass is dry.
   {
     SaturationEngine engine;
