@@ -1,7 +1,7 @@
 # Patina
 
 A five-model saturation plugin for Linux, in the same visual language as Comp
-Suite. Patina runs as a quick single-band saturator or as a three-band
+Suite. Patina runs as a quick single-band saturator or as a four-band
 multiband colour box with a different model per band. GPL-3.0-or-later.
 
 The CLAP bundle is built and installable; LV2 wiring is next.
@@ -24,25 +24,31 @@ curve), **Scope** (input vs shaped sine) and **Off**.
 
 ### Multiband
 
-Switch on **Multiband** for three bands with Linkwitz-Riley 4th-order
-crossovers (defaults 120 Hz and 2.5 kHz, draggable in the display):
+Switch on **Multiband** for four bands (Low, Lo-Mid, Hi-Mid, High) with
+Linkwitz-Riley 4th-order crossovers (defaults 120 Hz, 900 Hz and 5 kHz,
+draggable in the display):
 
 - Every band has its own **model**, **input**, **drive**, **character**,
-  **tone**, **mix**, **output**, mute and solo.
+  **tone**, **mix**, **level**, mute and solo.
+- **Level** runs from silence (0) through 0 dB to +12 dB, so a band can be
+  faded fully out or pushed hard.
 - The model tabs and knobs edit the selected band; the band row switches
-  between Low, Mid and High.
-- **Bands** view shows the three regions, live band energy and crossover
-  handles. **Scope** draws the selected band's shaped waveform inside its
-  region; **Off** hides the overlay.
+  between the four bands.
+- **Bands** shows the four regions, live band meters, crossover handles and
+  the input FFT spectrum. **Scope** draws the selected band's shaped waveform.
+  **Spec** shows the spectrum full-size. **Off** hides the overlays.
+- The spectrum is a 2048-point FFT analysed every 1024 samples, mapped to 128
+  log-spaced bins from 20 Hz to 20 kHz.
 - The master **Output**, Auto Gain and oversampling are global.
-- Switching from single-band seeds all three bands with the current sound;
+- Switching from single-band seeds all four bands with the current sound;
   switching back carries the selected band into single-band mode.
 
 ## Shared DSP
 
-Filters, ADAA shaping, oversampling and the meter helpers come from
-[`hearth-dsp`](https://github.com/tylorismusic-commits/hearth-dsp), consumed as
-a submodule. No DSP code is copied from Comp Suite.
+Filters, ADAA shaping, oversampling, the Linkwitz-Riley crossovers, the FFT
+spectrum analyser and the meter helpers come from
+[`hearth-dsp`](https://github.com/tylorismusic-commits/hearth-dsp) 0.3.0,
+consumed as a submodule. No DSP code is copied from Comp Suite.
 
 ## Build
 
@@ -69,14 +75,17 @@ Render the panel previews:
 - [x] Panel in the Comp Suite visual language (shape/scope displays)
 - [x] Factory presets
 - [x] DSP tests
-- [x] Three-band multiband mode with per-band models and crossovers
+- [x] Four-band multiband mode with per-band models and crossovers
+- [x] Real-time FFT spectrum display
 - [x] CLAP
 - [ ] LV2
 - [x] Host/state/latency integration
 
 The previews and the CLAP editor render from the same Panel class. Multiband
-previews are in `docs/patina-mb-low.png`, `patina-mb-mid.png`,
-`patina-mb-high.png` and `patina-mb-scope.png`.
+previews are in `docs/patina-mb-low.png`, `patina-mb-lomid.png`,
+`patina-mb-himid.png`, `patina-mb-high.png`, `patina-mb-scope.png` and
+`patina-mb-spectrum.png`; the single-band spectrum is
+`docs/patina-spectrum.png`.
 
 ## Licence
 

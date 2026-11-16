@@ -15,10 +15,14 @@ enum class Model : int {
 
 enum class Band : int {
   Low = 0,
-  Mid = 1,
-  High = 2,
-  Count = 3,
+  LowMid = 1,
+  HighMid = 2,
+  High = 3,
+  Count = 4,
 };
+
+constexpr int kBandCount = static_cast<int>(Band::Count);
+constexpr int kSpectrumBins = 128;
 
 struct BandControls {
   int model = 0;
@@ -28,7 +32,7 @@ struct BandControls {
   float character = 0.5f;
   float tone = 0.5f;
   float mix = 1.0f;
-  float output = 0.5f;  // 0..1 maps to -12..+12 dB
+  float level = 0.5f;   // 0 = off, 0.5 = 0 dB, 1 = +12 dB
 };
 
 struct Controls {
@@ -37,11 +41,12 @@ struct Controls {
   int selectedBand = 1;
   int soloBand = -1;
   float xover1 = 120.0f;  // Hz
-  float xover2 = 2500.0f; // Hz
+  float xover2 = 800.0f;  // Hz
+  float xover3 = 5000.0f; // Hz
   float output = 0.5f;
   bool autoGain = false;
   float oversample = 0.0f; // 0 Off, 1 2x, 2 4x
-  BandControls bands[3];
+  BandControls bands[kBandCount];
 };
 
 struct Meters {
@@ -50,7 +55,7 @@ struct Meters {
   float outPeakL = -120.0f;
   float outPeakR = -120.0f;
   float outVu = -120.0f;
-  float bandLevel[3] = {-120.0f, -120.0f, -120.0f};
+  float bandLevel[kBandCount] = {-120.0f, -120.0f, -120.0f, -120.0f};
 };
 
 } // namespace patina

@@ -25,6 +25,7 @@ enum ParamId : uint32_t {
   P_MB,
   P_XOVER1,
   P_XOVER2,
+  P_XOVER3,
   P_BAND,
   P_B0_MODEL,
   P_B0_INPUT,
@@ -50,6 +51,14 @@ enum ParamId : uint32_t {
   P_B2_MIX,
   P_B2_OUTPUT,
   P_B2_ON,
+  P_B3_MODEL,
+  P_B3_INPUT,
+  P_B3_DRIVE,
+  P_B3_CHARACTER,
+  P_B3_TONE,
+  P_B3_MIX,
+  P_B3_OUTPUT,
+  P_B3_ON,
   P_COUNT
 };
 
@@ -60,7 +69,7 @@ enum BandField : uint32_t {
   BF_CHARACTER,
   BF_TONE,
   BF_MIX,
-  BF_OUTPUT,
+  BF_LEVEL,
   BF_ON,
   BF_COUNT
 };
@@ -96,9 +105,10 @@ struct ParamSpec {
 
 inline constexpr const char* kModelLabels[] = {"Valve", "Console", "Bus", "Tape",
                                                "Transformer"};
-inline constexpr const char* kMeterLabels[] = {"Shape", "Scope", "Off"};
+inline constexpr const char* kMeterLabels[] = {"Shape", "Scope", "Spectrum",
+                                              "Off"};
 inline constexpr const char* kOversampleLabels[] = {"Off", "2x", "4x"};
-inline constexpr const char* kBandLabels[] = {"Low", "Mid", "High"};
+inline constexpr const char* kBandLabels[] = {"Low", "Lo-Mid", "Hi-Mid", "High"};
 
 #define PATINA_BAND_SPECS(prefix, module)                                      \
   {prefix "_model", "Model", module, 0.0, 4.0, 0.0, true, false, false,       \
@@ -113,7 +123,7 @@ inline constexpr const char* kBandLabels[] = {"Low", "Mid", "High"};
        nullptr, {}},                                                          \
       {prefix "_mix", "Mix", module, 0.0, 1.0, 1.0, false, false, false,      \
        nullptr, {}},                                                          \
-      {prefix "_output", "Output", module, 0.0, 1.0, 0.5, false, false, false, \
+      {prefix "_level", "Level", module, 0.0, 1.0, 0.5, false, false, false,  \
        "dB", {}},                                                             \
       {prefix "_on", "On", module, 0.0, 1.0, 1.0, true, false, true, nullptr, \
        {}}
@@ -134,7 +144,7 @@ inline constexpr ParamSpec kParamSpecs[P_COUNT] = {
      {}},
     {"auto_gain", "Auto Gain", "Output", 0.0, 1.0, 0.0, true, false, true,
      nullptr, {}},
-    {"meter", "Display", "Display", 0.0, 2.0, 0.0, true, true, false, nullptr,
+    {"meter", "Display", "Display", 0.0, 3.0, 0.0, true, true, false, nullptr,
      labels(kMeterLabels)},
     {"oversample", "Oversampling", "Oversampling", 0.0, 2.0, 0.0, true, false,
      false, nullptr, labels(kOversampleLabels)},
@@ -142,20 +152,23 @@ inline constexpr ParamSpec kParamSpecs[P_COUNT] = {
      {}},
     {"xover_low", "Low Xover", "Multiband", 40.0, 800.0, 120.0, false, false,
      false, "Hz", {}},
-    {"xover_high", "High Xover", "Multiband", 800.0, 12000.0, 2500.0, false,
+    {"xover_high", "High Xover", "Multiband", 200.0, 6000.0, 800.0, false,
      false, false, "Hz", {}},
-    {"band", "Band", "Multiband", 0.0, 2.0, 1.0, true, true, false, nullptr,
+    {"xover_air", "Air Xover", "Multiband", 1000.0, 16000.0, 5000.0, false,
+     false, false, "Hz", {}},
+    {"band", "Band", "Multiband", 0.0, 3.0, 1.0, true, true, false, nullptr,
      labels(kBandLabels)},
     PATINA_BAND_SPECS("band0", "Low Band"),
-    PATINA_BAND_SPECS("band1", "Mid Band"),
-    PATINA_BAND_SPECS("band2", "High Band"),
+    PATINA_BAND_SPECS("band1", "Lo-Mid Band"),
+    PATINA_BAND_SPECS("band2", "Hi-Mid Band"),
+    PATINA_BAND_SPECS("band3", "High Band"),
 };
 
 #undef PATINA_BAND_SPECS
 
 static_assert(sizeof(kParamSpecs) / sizeof(kParamSpecs[0]) == P_COUNT,
               "kParamSpecs must cover every parameter id");
-static_assert(P_COUNT == 38, "parameter table and enum must stay in sync");
+static_assert(P_COUNT == 47, "parameter table and enum must stay in sync");
 
 class Shared {
 public:
@@ -169,8 +182,11 @@ public:
     outPeakL.store(-120.0f);
     outPeakR.store(-120.0f);
     outVu.store(-120.0f);
-    for (int b = 0; b < 3; ++b) {
+    for (int b = 0; b < kBandCount; ++b) {
       bandLevel[b].store(-120.0f);
+    }
+    for (int i = 0; i < kSpectrumBins; ++i) {
+      spectrum[i].store(-120.0f);
     }
   }
 
@@ -225,7 +241,8 @@ public:
   std::atomic<float> outPeakL;
   std::atomic<float> outPeakR;
   std::atomic<float> outVu;
-  std::atomic<float> bandLevel[3];
+  std::atomic<float> bandLevel[kBandCount];
+  std::atomic<float> spectrum[kSpectrumBins];
   // UI-only solo state; not part of the parameter set or saved state.
   std::atomic<int> soloBand{-1};
   // Set once the single-band settings have been copied into the bands.
@@ -245,7 +262,7 @@ inline BandControls bandFrom(const Shared& s, int band) noexcept {
   b.character = static_cast<float>(s.get(bandParam(band, BF_CHARACTER)));
   b.tone = static_cast<float>(s.get(bandParam(band, BF_TONE)));
   b.mix = static_cast<float>(s.get(bandParam(band, BF_MIX)));
-  b.output = static_cast<float>(s.get(bandParam(band, BF_OUTPUT)));
+  b.level = static_cast<float>(s.get(bandParam(band, BF_LEVEL)));
   return b;
 }
 
@@ -254,16 +271,18 @@ inline Controls controlsFrom(const Shared& s) noexcept {
   c.enabled = s.get(P_ENABLED) > 0.5;
   c.multiband = s.get(P_MB) > 0.5;
   c.selectedBand =
-      std::min(std::max(static_cast<int>(s.get(P_BAND) + 0.5), 0), 2);
+      std::min(std::max(static_cast<int>(s.get(P_BAND) + 0.5), 0),
+               kBandCount - 1);
   c.soloBand = s.soloBand.load(std::memory_order_relaxed);
   c.xover1 = static_cast<float>(s.get(P_XOVER1));
   c.xover2 = static_cast<float>(s.get(P_XOVER2));
+  c.xover3 = static_cast<float>(s.get(P_XOVER3));
   c.output = static_cast<float>(s.get(P_OUTPUT));
   c.autoGain = s.get(P_AUTO_GAIN) > 0.5;
   c.oversample = static_cast<float>(s.get(P_OVERSAMPLE));
 
   if (c.multiband) {
-    for (int b = 0; b < 3; ++b) {
+    for (int b = 0; b < kBandCount; ++b) {
       c.bands[b] = bandFrom(s, b);
     }
   } else {
@@ -275,12 +294,12 @@ inline Controls controlsFrom(const Shared& s) noexcept {
     b.character = static_cast<float>(s.get(P_CHARACTER));
     b.tone = static_cast<float>(s.get(P_TONE));
     b.mix = static_cast<float>(s.get(P_MIX));
-    b.output = 0.5f;
+    b.level = 0.5f;
   }
   return c;
 }
 
-// First switch to multiband: seed all three bands from the current
+// First switch to multiband: seed all four bands from the current
 // single-band sound, so the mode change is not a jump to defaults.
 inline void enterMultiband(Shared& s) {
   if (!s.mbSeeded.exchange(true, std::memory_order_relaxed)) {
@@ -289,14 +308,14 @@ inline void enterMultiband(Shared& s) {
     const double character = s.get(P_CHARACTER);
     const double tone = s.get(P_TONE);
     const double mix = s.get(P_MIX);
-    for (int b = 0; b < 3; ++b) {
+    for (int b = 0; b < kBandCount; ++b) {
       s.set(bandParam(b, BF_MODEL), model);
       s.set(bandParam(b, BF_INPUT), 0.5);
       s.set(bandParam(b, BF_DRIVE), drive);
       s.set(bandParam(b, BF_CHARACTER), character);
       s.set(bandParam(b, BF_TONE), tone);
       s.set(bandParam(b, BF_MIX), mix);
-      s.set(bandParam(b, BF_OUTPUT), 0.5);
+      s.set(bandParam(b, BF_LEVEL), 0.5);
       s.set(bandParam(b, BF_ON), 1.0);
     }
   }
@@ -309,7 +328,8 @@ inline void enterMultiband(Shared& s) {
 // toggling back and forth is an A/B.
 inline void leaveMultiband(Shared& s) {
   const int b =
-      std::min(std::max(static_cast<int>(s.get(P_BAND) + 0.5), 0), 2);
+      std::min(std::max(static_cast<int>(s.get(P_BAND) + 0.5), 0),
+               kBandCount - 1);
   s.set(P_MODEL, s.get(bandParam(b, BF_MODEL)));
   s.set(P_DRIVE, s.get(bandParam(b, BF_DRIVE)));
   s.set(P_CHARACTER, s.get(bandParam(b, BF_CHARACTER)));

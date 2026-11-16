@@ -423,18 +423,19 @@ bool paramsValueToText(const clap_plugin_t*, clap_id id, double value,
       return true;
     case P_XOVER1:
     case P_XOVER2:
+    case P_XOVER3:
       std::snprintf(out, size, value >= 1000.0 ? "%.1f kHz" : "%.0f Hz",
                     value >= 1000.0 ? value / 1000.0 : value);
       return true;
     case P_BAND:
       std::snprintf(
           out, size, "%s",
-          kBandLabels[std::clamp(static_cast<int>(value + 0.5), 0, 2)]);
+          kBandLabels[std::clamp(static_cast<int>(value + 0.5), 0, 3)]);
       return true;
     case P_METER:
       std::snprintf(
           out, size, "%s",
-          kMeterLabels[std::clamp(static_cast<int>(value + 0.5), 0, 2)]);
+          kMeterLabels[std::clamp(static_cast<int>(value + 0.5), 0, 3)]);
       return true;
     case P_OVERSAMPLE:
       std::snprintf(
@@ -455,7 +456,6 @@ bool paramsValueToText(const clap_plugin_t*, clap_id id, double value,
                                     static_cast<int>(Model::Count) - 1)]);
         return true;
       case BF_INPUT:
-      case BF_OUTPUT:
         std::snprintf(out, size, "%+.1f dB", -12.0 + 24.0 * value);
         return true;
       case BF_DRIVE:
@@ -465,6 +465,15 @@ bool paramsValueToText(const clap_plugin_t*, clap_id id, double value,
       case BF_TONE:
       case BF_MIX:
         std::snprintf(out, size, "%.0f%%", value * 100.0);
+        return true;
+      case BF_LEVEL:
+        if (value <= 0.002) {
+          std::snprintf(out, size, "Off");
+        } else {
+          const double db = value <= 0.5 ? -60.0 + 120.0 * value
+                                        : 24.0 * (value - 0.5);
+          std::snprintf(out, size, "%+.1f dB", db);
+        }
         return true;
       case BF_ON:
         std::snprintf(out, size, "%s", value > 0.5 ? "On" : "Off");
@@ -512,7 +521,7 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
       }
       break;
     case P_METER:
-      if (matchList(kMeterLabels, 3, &v)) {
+      if (matchList(kMeterLabels, 4, &v)) {
         *value = v;
         return true;
       }
@@ -524,7 +533,7 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
       }
       break;
     case P_BAND:
-      if (matchList(kBandLabels, 3, &v)) {
+      if (matchList(kBandLabels, 4, &v)) {
         *value = v;
         return true;
       }
@@ -540,7 +549,7 @@ bool paramsTextToValue(const clap_plugin_t*, clap_id id, const char* text,
       *value = v;
       return true;
     }
-    if (field == BF_ON) {
+    if (field == BF_ON || field == BF_LEVEL) {
       if (strcasecmp(text, "On") == 0) {
         *value = 1.0;
         return true;
@@ -884,9 +893,13 @@ clap_process_status pluginProcess(const clap_plugin_t* p, const clap_process_t* 
   s->shared.outPeakL.store(s->meters.outPeakL, std::memory_order_relaxed);
   s->shared.outPeakR.store(s->meters.outPeakR, std::memory_order_relaxed);
   s->shared.outVu.store(s->meters.outVu, std::memory_order_relaxed);
-  for (int b = 0; b < 3; ++b) {
+  for (int b = 0; b < kBandCount; ++b) {
     s->shared.bandLevel[b].store(s->meters.bandLevel[b],
                                  std::memory_order_relaxed);
+  }
+  const float* spectrum = s->engine.spectrumBins();
+  for (int i = 0; i < kSpectrumBins; ++i) {
+    s->shared.spectrum[i].store(spectrum[i], std::memory_order_relaxed);
   }
   noteHostChanges(s);
   return CLAP_PROCESS_CONTINUE;

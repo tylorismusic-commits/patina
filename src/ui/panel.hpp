@@ -15,6 +15,12 @@ constexpr int kPanelWidth = 1040;
 constexpr int kPanelHeight = 640;
 
 struct PanelState {
+  PanelState() {
+    for (int i = 0; i < kSpectrumBins; ++i) {
+      spectrum[i] = -120.0f;
+    }
+  }
+
   int presetIndex = -1;
   bool presetDirty = false;
   int presetOpen = 0;
@@ -26,7 +32,8 @@ struct PanelState {
   float outLevelL = 0.0f;
   float outLevelR = 0.0f;
   float outPeakHold = 0.0f;
-  float bandLevel[3] = {-120.0f, -120.0f, -120.0f};
+  float bandLevel[kBandCount] = {-120.0f, -120.0f, -120.0f, -120.0f};
+  float spectrum[kSpectrumBins] = {};
 };
 
 class Panel {
@@ -108,9 +115,9 @@ private:
   void drawMultibandDisplay(cairo_t* cr, const Shared& shared,
                             const PanelState& state, int model, double fx,
                             double fy, double fw, double fh) const;
-  void drawShapeInset(cairo_t* cr, const Shared& shared, const PanelState& state,
-                      int model, int mode, double x, double y, double w,
-                      double h) const;
+  void drawSpectrum(cairo_t* cr, const PanelState& state, int model, double x,
+                    double y, double w, double h, double alpha,
+                    bool freqLabels) const;
   void drawLeds(cairo_t* cr, const Shared& shared) const;
   void drawLevelMeter(cairo_t* cr, double x, double y, double w, double h,
                       double dbL, double dbR, double minDb, double maxDb,

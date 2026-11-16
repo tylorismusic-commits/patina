@@ -62,8 +62,7 @@ public:
     driveSmooth_.setTarget(
         hdsp::dbToGain(-12.0f + 24.0f * clamp01(c.drive)));
     mixSmooth_.setTarget(clamp01(c.mix));
-    outputSmooth_.setTarget(
-        hdsp::dbToGain(-12.0f + 24.0f * clamp01(c.output)));
+    outputSmooth_.setTarget(levelGain(c.level));
     const bool audible = c.enabled && (soloBand < 0 || soloBand == band);
     enableSmooth_.setTarget(audible ? 1.0f : 0.0f);
     setFilters();
@@ -125,6 +124,18 @@ public:
 private:
   static float clamp01(float x) noexcept {
     return std::min(std::max(x, 0.0f), 1.0f);
+  }
+
+  // 0 = silence, 0.5 = 0 dB, 1 = +12 dB.  The lower half covers -60..0 dB,
+  // so a band can be faded all the way out with the Level knob.
+  static float levelGain(float value) noexcept {
+    const float v = clamp01(value);
+    if (v <= 0.002f) {
+      return 0.0f;
+    }
+    const float db =
+        v <= 0.5f ? -60.0f + 120.0f * v : 24.0f * (v - 0.5f);
+    return hdsp::dbToGain(db);
   }
 
   void setFilters() noexcept {
@@ -239,12 +250,16 @@ public:
     }
     controls_ = c;
     controls_.xover1 = std::min(std::max(c.xover1, 40.0f), 800.0f);
-    controls_.xover2 = std::min(std::max(c.xover2, 800.0f), 12000.0f);
-    if (controls_.xover2 <= controls_.xover1) {
+    controls_.xover2 = std::min(std::max(c.xover2, 200.0f), 6000.0f);
+    controls_.xover3 = std::min(std::max(c.xover3, 1000.0f), 16000.0f);
+    if (controls_.xover2 < controls_.xover1 + 20.0f) {
       controls_.xover2 = controls_.xover1 + 20.0f;
     }
+    if (controls_.xover3 < controls_.xover2 + 100.0f) {
+      controls_.xover3 = controls_.xover2 + 100.0f;
+    }
 
-    for (int b = 0; b < 3; ++b) {
+    for (int b = 0; b < kBandCount; ++b) {
       bands_[b].setControls(controls_.bands[b], controls_.soloBand, b);
     }
     outputSmooth_.setTarget(
@@ -257,9 +272,14 @@ public:
   // Latency of the current oversampling mode, in base-rate samples.
   int latencySamples() const noexcept { return os_.latencySamples(); }
 
+  const float* spectrumBins() const noexcept { return spectrum_.bins(); }
+
   void process(float* left, float* right, int frames, Meters& meters) noexcept {
+    // Analyse the unprocessed input so the editor has something to show even
+    // when the bands are faded out.
+    spectrum_.push(left, right, frames);
     Stats st;
-    for (int b = 0; b < 3; ++b) {
+    for (int b = 0; b < kBandCount; ++b) {
       st.band[b] = 0.0f;
     }
     if (factor_ == 1) {
@@ -279,7 +299,7 @@ public:
     meters.outPeakL = hdsp::gainToDb(st.outL);
     meters.outPeakR = hdsp::gainToDb(st.outR);
     meters.outVu = hdsp::gainToDb(std::sqrt(vuPower_)) + 18.0f;
-    for (int b = 0; b < 3; ++b) {
+    for (int b = 0; b < kBandCount; ++b) {
       meters.bandLevel[b] = hdsp::gainToDb(st.band[b]);
     }
   }
@@ -289,9 +309,10 @@ public:
     for (BandSaturator& b : bands_) {
       b.reset();
     }
-    for (hdsp::ThreeBandCrossover& xo : xover_) {
+    for (hdsp::FourBandCrossover& xo : xover_) {
       xo.reset();
     }
+    spectrum_.reset();
     inPower_ = 0.0f;
     outPower_ = 0.0f;
     autoDb_ = 0.0f;
@@ -304,7 +325,7 @@ private:
     float inR = 0.0f;
     float outL = 0.0f;
     float outR = 0.0f;
-    float band[3] = {0.0f, 0.0f, 0.0f};
+    float band[kBandCount] = {0.0f, 0.0f, 0.0f, 0.0f};
   };
 
   static int factorFor(float mode) noexcept {
@@ -323,15 +344,17 @@ private:
     for (BandSaturator& b : bands_) {
       b.prepare(osRate_);
     }
-    for (hdsp::ThreeBandCrossover& xo : xover_) {
+    for (hdsp::FourBandCrossover& xo : xover_) {
       xo.prepare(osRate_);
     }
+    spectrum_.prepare(baseRate_);
     outputSmooth_.setTime(15.0f, osRate_);
     vuCoeff_ = hdsp::timeCoeff(300.0f, osRate_);
     autoPowerCoeff_ = hdsp::timeCoeff(120.0f, osRate_);
     autoDbCoeff_ = hdsp::timeCoeff(250.0f, osRate_);
     xover1Cur_ = controls_.xover1;
     xover2Cur_ = controls_.xover2;
+    xover3Cur_ = controls_.xover3;
     updateCrossovers(true);
     reset();
   }
@@ -339,23 +362,28 @@ private:
   void updateCrossovers(bool snap) noexcept {
     const float target1 = controls_.xover1;
     const float target2 = controls_.xover2;
+    const float target3 = controls_.xover3;
     if (snap) {
       xover1Cur_ = target1;
       xover2Cur_ = target2;
+      xover3Cur_ = target3;
     } else {
       // Block-rate smoothing: a dragged crossover moves in small steps
       // instead of rebuilding the filters with a jump every buffer.
       xover1Cur_ += (target1 - xover1Cur_) * 0.25f;
       xover2Cur_ += (target2 - xover2Cur_) * 0.25f;
+      xover3Cur_ += (target3 - xover3Cur_) * 0.25f;
     }
     if (std::fabs(xover1Cur_ - xover1Applied_) < 0.05f &&
-        std::fabs(xover2Cur_ - xover2Applied_) < 0.05f) {
+        std::fabs(xover2Cur_ - xover2Applied_) < 0.05f &&
+        std::fabs(xover3Cur_ - xover3Applied_) < 0.05f) {
       return;
     }
     xover1Applied_ = xover1Cur_;
     xover2Applied_ = xover2Cur_;
-    for (hdsp::ThreeBandCrossover& xo : xover_) {
-      xo.setCrossovers(xover1Cur_, xover2Cur_);
+    xover3Applied_ = xover3Cur_;
+    for (hdsp::FourBandCrossover& xo : xover_) {
+      xo.setCrossovers(xover1Cur_, xover2Cur_, xover3Cur_);
     }
   }
 
@@ -377,15 +405,15 @@ private:
       float wetR = dryR;
 
       if (multiband) {
-        float lowL = 0.0f, midL = 0.0f, highL = 0.0f;
-        float lowR = 0.0f, midR = 0.0f, highR = 0.0f;
-        xover_[0].process(dryL, lowL, midL, highL);
-        xover_[1].process(dryR, lowR, midR, highR);
-        float bandL[3] = {lowL, midL, highL};
-        float bandR[3] = {lowR, midR, highR};
+        float b0L = 0.0f, b1L = 0.0f, b2L = 0.0f, b3L = 0.0f;
+        float b0R = 0.0f, b1R = 0.0f, b2R = 0.0f, b3R = 0.0f;
+        xover_[0].process(dryL, b0L, b1L, b2L, b3L);
+        xover_[1].process(dryR, b0R, b1R, b2R, b3R);
+        float bandL[kBandCount] = {b0L, b1L, b2L, b3L};
+        float bandR[kBandCount] = {b0R, b1R, b2R, b3R};
         wetL = 0.0f;
         wetR = 0.0f;
-        for (int b = 0; b < 3; ++b) {
+        for (int b = 0; b < kBandCount; ++b) {
           bands_[b].process(bandL[b], bandR[b]);
           st.band[b] =
               std::max(st.band[b], std::max(std::fabs(bandL[b]),
@@ -440,13 +468,16 @@ private:
   int factor_ = 1;
   Controls controls_;
   hdsp::Oversampler os_;
-  BandSaturator bands_[3];
-  hdsp::ThreeBandCrossover xover_[2];
+  BandSaturator bands_[kBandCount];
+  hdsp::FourBandCrossover xover_[2];
+  hdsp::SpectrumAnalyzer spectrum_;
   hdsp::Smoothed outputSmooth_;
   float xover1Cur_ = 120.0f;
-  float xover2Cur_ = 2500.0f;
+  float xover2Cur_ = 800.0f;
+  float xover3Cur_ = 5000.0f;
   float xover1Applied_ = -1.0f;
   float xover2Applied_ = -1.0f;
+  float xover3Applied_ = -1.0f;
   float inPower_ = 0.0f;
   float outPower_ = 0.0f;
   float autoDb_ = 0.0f;

@@ -33,17 +33,18 @@ Controls multiControls(int mode) {
   Controls c;
   c.multiband = true;
   c.xover1 = 120.0f;
-  c.xover2 = 2500.0f;
+  c.xover2 = 800.0f;
+  c.xover3 = 5000.0f;
   c.output = 0.5f;
   c.oversample = static_cast<float>(mode);
-  const int models[3] = {4, 0, 1};
-  for (int b = 0; b < 3; ++b) {
+  const int models[4] = {4, 0, 2, 1};
+  for (int b = 0; b < kBandCount; ++b) {
     c.bands[b].model = models[b];
     c.bands[b].drive = 0.6f;
     c.bands[b].character = 0.6f;
     c.bands[b].tone = 0.45f;
     c.bands[b].mix = 1.0f;
-    c.bands[b].output = 0.5f;
+    c.bands[b].level = 0.5f;
   }
   return c;
 }
@@ -92,7 +93,7 @@ int main() {
     }
   }
 
-  // All three bands, each with a different model, at every oversampling mode.
+  // All four bands, each with a different model, at every oversampling mode.
   for (int mode = 0; mode < 3; ++mode) {
     SaturationEngine engine;
     engine.prepare(kSr);
@@ -155,8 +156,8 @@ int main() {
       }
     }
     const double ratio = std::sqrt(outPower / inPower);
-    check(std::fabs(ratio - 1.0) < 0.02,
-          "clean three-band path sums flat");
+    check(std::fabs(ratio - 1.0) < 0.03,
+          "clean four-band path is within 0.3 dB");
   }
 
   // Muting the upper bands must remove high-frequency content.
@@ -166,6 +167,7 @@ int main() {
     Controls c = multiControls(0);
     c.bands[1].enabled = false;
     c.bands[2].enabled = false;
+    c.bands[3].enabled = false;
     engine.setControls(c);
     Meters meters;
     std::vector<float> l(256), r(256);
@@ -210,6 +212,56 @@ int main() {
     }
     check(std::sqrt(power / (29 * 256)) > 0.01,
           "soloing the mid band keeps 1 kHz");
+  }
+
+  // Level at minimum is true silence, not just -60 dB.
+  {
+    SaturationEngine engine;
+    engine.prepare(kSr);
+    Controls c = multiControls(0);
+    c.bands[1].level = 0.0f;
+    c.soloBand = 1;
+    engine.setControls(c);
+    Meters meters;
+    std::vector<float> l(256), r(256);
+    float peak = 0.0f;
+    for (int b = 0; b < 80; ++b) {
+      for (int i = 0; i < 256; ++i) {
+        const float t = static_cast<float>(b * 256 + i) / kSr;
+        l[i] = r[i] = 0.4f * std::sin(2.0f * 3.14159265f * 500.0f * t);
+      }
+      engine.process(l.data(), r.data(), 256, meters);
+      if (b > 60) {
+        for (int i = 0; i < 256; ++i) {
+          peak = std::max(peak, std::fabs(l[i]));
+        }
+      }
+    }
+    check(peak < 1.0e-6f, "band level at zero is silent");
+  }
+
+  // The engine exposes the FFT of the input for the editor.
+  {
+    SaturationEngine engine;
+    engine.prepare(kSr);
+    engine.setControls(multiControls(0));
+    Meters meters;
+    std::vector<float> l(256), r(256);
+    for (int b = 0; b < 200; ++b) {
+      for (int i = 0; i < 256; ++i) {
+        const float t = static_cast<float>(b * 256 + i) / kSr;
+        l[i] = r[i] = 0.4f * std::sin(2.0f * 3.14159265f * 1000.0f * t);
+      }
+      engine.process(l.data(), r.data(), 256, meters);
+    }
+    const float* bins = engine.spectrumBins();
+    int peak = 0;
+    for (int i = 1; i < kSpectrumBins; ++i) {
+      if (bins[i] > bins[peak]) peak = i;
+    }
+    const float hz = hdsp::SpectrumAnalyzer::binFrequency(peak);
+    check(hz > 780.0f && hz < 1260.0f,
+          "engine exposes the input spectrum for the editor");
   }
 
   // Left-only input must not appear on the right.

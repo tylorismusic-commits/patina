@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
 
   check(params && params->count(plugin) == patina::P_COUNT,
         "parameter count matches the table");
-  check(params && params->count(plugin) == 38, "thirty-eight parameters");
+  check(params && params->count(plugin) == 47, "forty-seven parameters");
   check(latency != nullptr, "latency extension present");
   check(latency && latency->get(plugin) == 0,
         "latency is zero with oversampling off");
@@ -253,10 +253,11 @@ int main(int argc, char** argv) {
   {
     events.inputs.push_back(paramEvent(patina::P_MB, 1.0));
     events.inputs.push_back(paramEvent(patina::P_XOVER1, 120.0));
-    events.inputs.push_back(paramEvent(patina::P_XOVER2, 2800.0));
+    events.inputs.push_back(paramEvent(patina::P_XOVER2, 900.0));
+    events.inputs.push_back(paramEvent(patina::P_XOVER3, 5000.0));
     events.inputs.push_back(paramEvent(patina::P_BAND, 1.0));
-    const int models[3] = {4, 0, 1};
-    for (int b = 0; b < 3; ++b) {
+    const int models[4] = {4, 0, 2, 1};
+    for (int b = 0; b < patina::kBandCount; ++b) {
       events.inputs.push_back(
           paramEvent(patina::bandParam(b, patina::BF_MODEL), models[b]));
       events.inputs.push_back(
@@ -267,6 +268,8 @@ int main(int argc, char** argv) {
           paramEvent(patina::bandParam(b, patina::BF_TONE), 0.45));
       events.inputs.push_back(
           paramEvent(patina::bandParam(b, patina::BF_MIX), 1.0));
+      events.inputs.push_back(
+          paramEvent(patina::bandParam(b, patina::BF_LEVEL), 0.5));
     }
     bool mbFinite = true;
     double mbPower = 0.0;
@@ -407,8 +410,16 @@ int main(int argc, char** argv) {
           "band model reads as a name");
     params->value_to_text(plugin, patina::P_XOVER1, 120.0, buf, sizeof(buf));
     check(std::strcmp(buf, "120 Hz") == 0, "crossover reads as Hz");
-    params->value_to_text(plugin, patina::P_BAND, 2.0, buf, sizeof(buf));
+    params->value_to_text(plugin, patina::P_XOVER3, 5000.0, buf, sizeof(buf));
+    check(std::strcmp(buf, "5.0 kHz") == 0, "air crossover reads as kHz");
+    params->value_to_text(plugin, patina::P_BAND, 3.0, buf, sizeof(buf));
     check(std::strcmp(buf, "High") == 0, "band selection reads as a name");
+    params->value_to_text(plugin, patina::bandParam(1, patina::BF_LEVEL), 0.0,
+                          buf, sizeof(buf));
+    check(std::strcmp(buf, "Off") == 0, "band level reaches off");
+    params->value_to_text(plugin, patina::bandParam(1, patina::BF_LEVEL), 0.75,
+                          buf, sizeof(buf));
+    check(std::strcmp(buf, "+6.0 dB") == 0, "band level reads as dB");
   }
 
   // Editor on the current display, if there is one.
@@ -491,7 +502,29 @@ int main(int argc, char** argv) {
         params->get_value(plugin, id, &v);
         return v;
       };
+      auto pumpAudio = [&](int blocks) {
+        for (int b = 0; b < blocks; ++b) {
+          for (uint32_t i = 0; i < kFrames; ++i) {
+            const double t = (b * kFrames + i) / 48000.0;
+            left[i] = right[i] = static_cast<float>(
+                0.18 * std::sin(2.0 * M_PI * 90.0 * t) +
+                0.10 * std::sin(2.0 * M_PI * 420.0 * t) +
+                0.07 * std::sin(2.0 * M_PI * 1600.0 * t) +
+                0.05 * std::sin(2.0 * M_PI * 6500.0 * t));
+          }
+          clap_process_t proc{};
+          proc.frames_count = kFrames;
+          proc.audio_inputs = &inBuf;
+          proc.audio_outputs = &outBuf;
+          proc.audio_inputs_count = 1;
+          proc.audio_outputs_count = 1;
+          proc.in_events = nullptr;
+          proc.out_events = nullptr;
+          plugin->process(plugin, &proc);
+        }
+      };
 
+      pumpAudio(24);
       const double driveBefore = paramValue(patina::P_DRIVE);
       drag(300, 430, -60);
       std::printf("  drive %.2f -> %.2f\n", driveBefore,
@@ -541,31 +574,34 @@ int main(int argc, char** argv) {
       setParam(patina::P_MB, 1.0);
       setParam(patina::P_BAND, 1.0);
       setParam(patina::P_XOVER1, 120.0);
-      setParam(patina::P_XOVER2, 2800.0);
-      const int bandModels[3] = {4, 0, 1};
-      const double bandDrives[3] = {0.58, 0.44, 0.36};
-      const double bandTones[3] = {0.36, 0.55, 0.66};
-      for (int b = 0; b < 3; ++b) {
+      setParam(patina::P_XOVER2, 900.0);
+      setParam(patina::P_XOVER3, 5000.0);
+      const int bandModels[4] = {4, 0, 2, 1};
+      const double bandDrives[4] = {0.58, 0.44, 0.38, 0.32};
+      const double bandTones[4] = {0.36, 0.55, 0.58, 0.66};
+      for (int b = 0; b < patina::kBandCount; ++b) {
         setParam(patina::bandParam(b, patina::BF_MODEL), bandModels[b]);
         setParam(patina::bandParam(b, patina::BF_DRIVE), bandDrives[b]);
         setParam(patina::bandParam(b, patina::BF_TONE), bandTones[b]);
         setParam(patina::bandParam(b, patina::BF_CHARACTER), 0.5);
         setParam(patina::bandParam(b, patina::BF_MIX), 1.0);
+        setParam(patina::bandParam(b, patina::BF_LEVEL), 0.5);
       }
+      pumpAudio(24);
       std::this_thread::sleep_for(std::chrono::milliseconds(350));
       check(paramValue(patina::P_MB) == 1.0, "multiband UI is active");
       capture("/tmp/opencode/patina-editor-mb.ppm");
 
       const double bandDriveBefore =
           paramValue(patina::bandParam(1, patina::BF_DRIVE));
-      drag(370, 470, -60);
+      drag(355, 470, -60);
       std::printf("  band drive %.2f -> %.2f\n", bandDriveBefore,
                   paramValue(patina::bandParam(1, patina::BF_DRIVE)));
       check(paramValue(patina::bandParam(1, patina::BF_DRIVE)) >
                 bandDriveBefore + 0.05,
             "dragging the selected band's DRIVE moves it");
 
-      click(224, 354);
+      click(216, 354);
       check(paramValue(patina::P_BAND) == 0.0,
             "clicking LOW selects the low band");
       click(718, 90);
@@ -578,6 +614,25 @@ int main(int argc, char** argv) {
             "leaving multiband carries the selected band to single");
       click(815, 32);
       check(paramValue(patina::P_MB) == 1.0, "multiband toggles back on");
+
+      // Fourth band and the full-range Level knob.
+      click(624, 354);
+      check(paramValue(patina::P_BAND) == 3.0,
+            "clicking HIGH selects the fourth band");
+      const double levelBefore =
+          paramValue(patina::bandParam(3, patina::BF_LEVEL));
+      drag(835, 470, -60);
+      std::printf("  high level %.2f -> %.2f\n", levelBefore,
+                  paramValue(patina::bandParam(3, patina::BF_LEVEL)));
+      check(paramValue(patina::bandParam(3, patina::BF_LEVEL)) >
+                levelBefore + 0.05,
+            "dragging the fourth band LEVEL moves it");
+
+      click(362, 143);
+      check(paramValue(patina::P_METER) == 2.0, "SPEC selects the spectrum");
+      pumpAudio(24);
+      std::this_thread::sleep_for(std::chrono::milliseconds(350));
+      capture("/tmp/opencode/patina-editor-spectrum.ppm");
 
       gui->hide(plugin);
       gui->destroy(plugin);
