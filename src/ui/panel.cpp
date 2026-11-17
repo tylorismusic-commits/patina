@@ -4,6 +4,7 @@
 
 #include "dsp/saturation.hpp"
 #include "presets.hpp"
+#include "value_text.hpp"
 
 #include <cairo-ft.h>
 #include <ft2build.h>
@@ -537,6 +538,7 @@ void Panel::draw(cairo_t* cr, Shared& shared, const PanelState& state) {
                  -60.0, 3.0, model, true);
 
   for (const Widget& w : widgets_) drawWidget(cr, w, shared, state, model);
+  if (editing_) drawTextEntry(cr, shared);
   if (state.presetOpen) drawPresetList(cr, shared, state);
   if (shared.get(P_MB) > 0.5) {
     const int sel = selectedBand(shared);
@@ -1307,6 +1309,12 @@ bool Panel::hitWidget(const Widget& w, double x, double y) const {
 }
 
 bool Panel::pointerDown(Shared& shared, PanelState& state, double x, double y) {
+  if (editing_) {
+    if (hitTextEntry(x, y)) return true;
+    commitTextEntry(shared, state);
+    editing_ = false;
+    editText_.clear();
+  }
   if (handlePresetClick(shared, state, x, y)) return true;
   for (const Widget& w : widgets_) {
     if (!hitWidget(w, x, y)) continue;
@@ -1528,6 +1536,89 @@ void Panel::drawPresetList(cairo_t* cr, const Shared& shared,
     y += kListRow;
   }
   cairo_restore(cr);
+}
+
+
+void Panel::beginTextEntry(Shared& shared, PanelState& state, double x,
+                           double y) {
+  (void)shared;
+  state.presetOpen = 0;
+  for (const Widget& w : widgets_) {
+    if (!hitWidget(w, x, y)) continue;
+    if (w.kind != Kind::Knob) return;
+    editing_ = true;
+    editParam_ = w.param;
+    editText_.clear();
+    editBoxX_ = std::clamp(x + 16.0, 4.0, kPanelWidth - kEditW - 4.0);
+    editBoxY_ = y - kEditH - 14.0;
+    if (editBoxY_ < 4.0) {
+      editBoxY_ = std::min(y + 20.0, kPanelHeight - kEditH - 4.0);
+    }
+    return;
+  }
+}
+
+bool Panel::hitTextEntry(double x, double y) const {
+  return editing_ && x >= editBoxX_ && x <= editBoxX_ + kEditW &&
+         y >= editBoxY_ && y <= editBoxY_ + kEditH;
+}
+
+bool Panel::textKey(Shared& shared, PanelState& state, int key, char ch) {
+  if (!editing_) return false;
+  if (key == kTextEnter) return commitTextEntry(shared, state);
+  if (key == kTextEscape) {
+    editing_ = false;
+    editText_.clear();
+    return true;
+  }
+  if (key == kTextBackspace) {
+    if (!editText_.empty()) editText_.pop_back();
+    return true;
+  }
+  if (ch >= 32 && ch < 127 && editText_.size() < 24) {
+    editText_.push_back(ch);
+  }
+  return true;
+}
+
+bool Panel::commitTextEntry(Shared& shared, PanelState& state) {
+  if (!editing_) return false;
+  if (editText_.empty()) {
+    editing_ = false;
+    return false;
+  }
+  double value = 0.0;
+  if (!parseParamValue(shared, editParam_, editText_, &value)) {
+    return false;
+  }
+  shared.set(editParam_, value);
+  state.presetDirty = true;
+  editing_ = false;
+  editText_.clear();
+  return true;
+}
+
+void Panel::drawTextEntry(cairo_t* cr, const Shared& shared) const {
+  if (!editing_) return;
+  const int model = static_cast<int>(shared.get(P_MODEL) + 0.5);
+  const Skin skin = skinFor(model);
+  const ParamSpec& spec = kParamSpecs[editParam_];
+  const std::string current =
+      formatParamValue(shared, editParam_, shared.get(editParam_));
+  const std::string shown = (editText_.empty() ? current : editText_) + "|";
+  roundRect(cr, editBoxX_, editBoxY_, kEditW, kEditH, 4);
+  cairo_set_source_rgba(cr, 0.035, 0.04, 0.05, 0.98);
+  cairo_fill(cr);
+  setRgb(cr, skin.tabOn, 0.9);
+  cairo_set_line_width(cr, 1.2);
+  roundRect(cr, editBoxX_ + 0.5, editBoxY_ + 0.5, kEditW - 1, kEditH - 1, 4);
+  cairo_stroke(cr);
+  text(cr, spec.name, editBoxX_ + 8, editBoxY_ + 12, 8.0, 0,
+       skin.legendDim.r, skin.legendDim.g, skin.legendDim.b);
+  text(cr, shown.c_str(), editBoxX_ + 8, editBoxY_ + 26, 10.5, 0,
+       editText_.empty() ? skin.legendDim.r : skin.legend.r,
+       editText_.empty() ? skin.legendDim.g : skin.legend.g,
+       editText_.empty() ? skin.legendDim.b : skin.legend.b);
 }
 
 void Panel::applyPreset(Shared& shared, PanelState& state, int index) const {

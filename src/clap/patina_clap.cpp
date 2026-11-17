@@ -5,6 +5,7 @@
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
+#include <X11/keysym.h>
 #include <cairo-xlib.h>
 #include <dlfcn.h>
 
@@ -24,6 +25,7 @@
 
 #include "dsp/saturation.hpp"
 #include "params.hpp"
+#include "value_text.hpp"
 #include "version.hpp"
 #include "ui/geometry.hpp"
 #include "ui/panel.hpp"
@@ -146,6 +148,8 @@ private:
     XStoreName(dpy, win, kPluginName);
     XMapRaised(dpy, win);
     XFlush(dpy);
+    display_ = dpy;
+    window_ = win;
 
     panel_.loadFont(bundleResourceDir());
     {
@@ -243,6 +247,8 @@ private:
     if (windowSurface) {
       cairo_surface_destroy(windowSurface);
     }
+    display_ = nullptr;
+    window_ = 0;
     XDestroyWindow(dpy, win);
     XCloseDisplay(dpy);
   }
@@ -252,6 +258,10 @@ private:
     const double s = scale();
     switch (ev.type) {
       case ButtonPress: {
+        if (display_ && window_) {
+          XSetInputFocus(display_, window_, RevertToParent, CurrentTime);
+          XFlush(display_);
+        }
         const double x = ev.xbutton.x / s;
         const double y = ev.xbutton.y / s;
         if (ev.xbutton.button == Button4) {
@@ -260,12 +270,30 @@ private:
           panel_.wheel(shared_, state_, x, y, -1.0);
         } else if (ev.xbutton.button == Button1) {
           panel_.pointerDown(shared_, state_, x, y);
+        } else if (ev.xbutton.button == Button3) {
+          panel_.beginTextEntry(shared_, state_, x, y);
         }
         break;
       }
       case ButtonRelease:
         panel_.pointerUp();
         break;
+      case KeyPress: {
+        char buf[8] = {};
+        KeySym sym = 0;
+        XKeyEvent key = ev.xkey;
+        const int n = XLookupString(&key, buf, sizeof(buf), &sym, nullptr);
+        if (sym == XK_Return || sym == XK_KP_Enter) {
+          panel_.textKey(shared_, state_, Panel::kTextEnter, 0);
+        } else if (sym == XK_Escape) {
+          panel_.textKey(shared_, state_, Panel::kTextEscape, 0);
+        } else if (sym == XK_BackSpace) {
+          panel_.textKey(shared_, state_, Panel::kTextBackspace, 0);
+        } else if (n > 0) {
+          panel_.textKey(shared_, state_, 0, buf[0]);
+        }
+        break;
+      }
       case MotionNotify: {
         const bool fine = (ev.xmotion.state & ShiftMask) != 0;
         panel_.pointerMove(shared_, state_, ev.xmotion.x / s, ev.xmotion.y / s,
@@ -282,6 +310,8 @@ private:
   Panel panel_;
   std::atomic<double> scale_{1.0};
   std::atomic<bool> resetUi_{false};
+  Display* display_ = nullptr;
+  Window window_ = 0;
   std::mutex mutex_;
   std::condition_variable cv_;
   Window parentWindow_ = 0;
@@ -373,293 +403,20 @@ bool paramsValue(const clap_plugin_t* p, clap_id id, double* value) {
 
 bool paramsValueToText(const clap_plugin_t* p, clap_id id, double value,
                        char* out, uint32_t size) {
-  const int count = bandCount(self(p)->shared);
-  switch (id) {
-    case P_MODEL:
-      std::snprintf(
-          out, size, "%s",
-          kModelLabels[std::clamp(static_cast<int>(value + 0.5), 0,
-                                  static_cast<int>(Model::Count) - 1)]);
-      return true;
-    case P_ENABLED:
-    case P_AUTO_GAIN:
-    case P_MB:
-      std::snprintf(out, size, "%s", value > 0.5 ? "On" : "Off");
-      return true;
-    case P_DRIVE:
-    case P_OUTPUT:
-      std::snprintf(out, size, "%+.1f dB", -12.0 + 24.0 * value);
-      return true;
-    case P_CHARACTER:
-    case P_TONE:
-    case P_MIX:
-      std::snprintf(out, size, "%.0f%%", value * 100.0);
-      return true;
-    case P_XOVER1:
-    case P_XOVER2:
-    case P_XOVER3:
-      std::snprintf(out, size, value >= 1000.0 ? "%.1f kHz" : "%.0f Hz",
-                    value >= 1000.0 ? value / 1000.0 : value);
-      return true;
-    case P_BANDS:
-      std::snprintf(
-          out, size, "%s",
-          kBandCountLabels[std::clamp(static_cast<int>(value + 0.5), 2, 4) -
-                           2]);
-      return true;
-    case P_BAND: {
-      int index = activeBandIndex(
-          count, std::clamp(static_cast<int>(value + 0.5), 0, 3));
-      if (index < 0) {
-        index = 0;
-      }
-      std::snprintf(out, size, "%s", bandLabelForCount(count, index));
-      return true;
-    }
-    case P_METER:
-      std::snprintf(
-          out, size, "%s",
-          kMeterLabels[std::clamp(static_cast<int>(value + 0.5), 0, 3)]);
-      return true;
-    case P_OVERSAMPLE:
-      std::snprintf(
-          out, size, "%s",
-          kOversampleLabels[std::clamp(static_cast<int>(value + 0.5), 0, 2)]);
-      return true;
-    default:
-      break;
+  if (id >= P_COUNT) {
+    return false;
   }
-  if (id >= P_B0_MODEL && id < P_BANDS) {
-    const uint32_t offset = id - P_B0_MODEL;
-    const BandField field = static_cast<BandField>(offset % BF_COUNT);
-    switch (field) {
-      case BF_MODEL:
-        std::snprintf(
-            out, size, "%s",
-            kModelLabels[std::clamp(static_cast<int>(value + 0.5), 0,
-                                    static_cast<int>(Model::Count) - 1)]);
-        return true;
-      case BF_INPUT:
-      case BF_DRIVE:
-        std::snprintf(out, size, "%+.1f dB", -12.0 + 24.0 * value);
-        return true;
-      case BF_CHARACTER:
-      case BF_TONE:
-      case BF_MIX:
-        std::snprintf(out, size, "%.0f%%", value * 100.0);
-        return true;
-      case BF_LEVEL:
-        if (value <= 0.002) {
-          std::snprintf(out, size, "Off");
-        } else {
-          const double db = value <= 0.5 ? -60.0 + 120.0 * value
-                                        : 24.0 * (value - 0.5);
-          std::snprintf(out, size, "%+.1f dB", db);
-        }
-        return true;
-      case BF_ON:
-        std::snprintf(out, size, "%s", value > 0.5 ? "On" : "Off");
-        return true;
-      default:
-        break;
-    }
-  }
-  std::snprintf(out, size, "%.2f", value);
+  const std::string text = formatParamValue(self(p)->shared, id, value);
+  std::snprintf(out, size, "%s", text.c_str());
   return true;
 }
 
 bool paramsTextToValue(const clap_plugin_t* p, clap_id id, const char* text,
                        double* value) {
-  if (!text) {
+  if (!text || id >= P_COUNT) {
     return false;
   }
-  auto matchList = [&](const char* const* list, int n, double* out) {
-    for (int i = 0; i < n; ++i) {
-      if (strcasecmp(text, list[i]) == 0) {
-        *out = i;
-        return true;
-      }
-    }
-    return false;
-  };
-  auto hasDb = [&]() {
-    for (const char* c = text; *c; ++c) {
-      if ((c[0] == 'd' || c[0] == 'D') &&
-          (c[1] == 'b' || c[1] == 'B')) {
-        return true;
-      }
-    }
-    return false;
-  };
-  auto parseDb = [&](double* out) {
-    char* end = nullptr;
-    const double v = std::strtod(text, &end);
-    if (end == text) {
-      return false;
-    }
-    *out = hasDb() ? (v + 12.0) / 24.0 : (v > 1.0 ? (v + 12.0) / 24.0 : v);
-    return true;
-  };
-  auto parsePercent = [&](double* out) {
-    char* end = nullptr;
-    const double v = std::strtod(text, &end);
-    if (end == text) {
-      return false;
-    }
-    *out = (std::strchr(text, '%') != nullptr || v > 1.0) ? v / 100.0 : v;
-    return true;
-  };
-  auto parseHz = [&](double* out) {
-    char* end = nullptr;
-    double v = std::strtod(text, &end);
-    if (end == text) {
-      return false;
-    }
-    while (*end == ' ' || *end == '\t') {
-      ++end;
-    }
-    if (*end == 'k' || *end == 'K') {
-      v *= 1000.0;
-    }
-    *out = v;
-    return true;
-  };
-  auto parseLevel = [&](double* out) {
-    char* end = nullptr;
-    const double v = std::strtod(text, &end);
-    if (end == text) {
-      return false;
-    }
-    if (!hasDb() && v >= 0.0 && v <= 1.0) {
-      *out = v;
-    } else if (v <= -60.0) {
-      *out = 0.0;
-    } else if (v <= 0.0) {
-      *out = (v + 60.0) / 120.0;
-    } else {
-      *out = 0.5 + v / 24.0;
-    }
-    return true;
-  };
-
-  double v = 0.0;
-  switch (id) {
-    case P_MODEL:
-      if (matchList(kModelLabels, static_cast<int>(Model::Count), &v)) {
-        *value = v;
-        return true;
-      }
-      break;
-    case P_ENABLED:
-    case P_AUTO_GAIN:
-    case P_MB:
-      if (strcasecmp(text, "On") == 0) {
-        *value = 1.0;
-        return true;
-      }
-      if (strcasecmp(text, "Off") == 0) {
-        *value = 0.0;
-        return true;
-      }
-      break;
-    case P_DRIVE:
-    case P_OUTPUT:
-      if (parseDb(value)) {
-        return true;
-      }
-      break;
-    case P_CHARACTER:
-    case P_TONE:
-    case P_MIX:
-      if (parsePercent(value)) {
-        return true;
-      }
-      break;
-    case P_XOVER1:
-    case P_XOVER2:
-    case P_XOVER3:
-      if (parseHz(value)) {
-        return true;
-      }
-      break;
-    case P_METER:
-      if (matchList(kMeterLabels, 4, &v)) {
-        *value = v;
-        return true;
-      }
-      break;
-    case P_OVERSAMPLE:
-      if (matchList(kOversampleLabels, 3, &v)) {
-        *value = v;
-        return true;
-      }
-      break;
-    case P_BAND:
-      if (matchList(kBandLabels, 4, &v)) {
-        *value = v;
-        return true;
-      }
-      if (strcasecmp(text, "Mid") == 0) {
-        *value = activeBandSlot(bandCount(self(p)->shared), 1);
-        return true;
-      }
-      break;
-    case P_BANDS:
-      if (matchList(kBandCountLabels, 3, &v)) {
-        *value = v + 2.0;
-        return true;
-      }
-      break;
-    default:
-      break;
-  }
-
-  if (id >= P_B0_MODEL && id < P_BANDS) {
-    const uint32_t offset = id - P_B0_MODEL;
-    const BandField field = static_cast<BandField>(offset % BF_COUNT);
-    if (field == BF_MODEL &&
-        matchList(kModelLabels, static_cast<int>(Model::Count), &v)) {
-      *value = v;
-      return true;
-    }
-    if (field == BF_ON) {
-      if (strcasecmp(text, "On") == 0) {
-        *value = 1.0;
-        return true;
-      }
-      if (strcasecmp(text, "Off") == 0) {
-        *value = 0.0;
-        return true;
-      }
-    }
-    if (field == BF_INPUT || field == BF_DRIVE) {
-      if (parseDb(value)) {
-        return true;
-      }
-    }
-    if (field == BF_CHARACTER || field == BF_TONE || field == BF_MIX) {
-      if (parsePercent(value)) {
-        return true;
-      }
-    }
-    if (field == BF_LEVEL) {
-      if (strcasecmp(text, "Off") == 0) {
-        *value = 0.0;
-        return true;
-      }
-      if (parseLevel(value)) {
-        return true;
-      }
-    }
-  }
-
-  char* end = nullptr;
-  v = std::strtod(text, &end);
-  if (end == text) {
-    return false;
-  }
-  *value = v;
-  return true;
+  return parseParamValue(self(p)->shared, id, text, value);
 }
 
 void applyEvents(Plugin* s, const clap_input_events_t* in) {

@@ -74,6 +74,12 @@ tar xzf patina-<version>-lv2.tar.gz -C ~/.lv2
 Restart the host or rescan CLAP/LV2 plugins. REAPER scans both user
 directories at startup.
 
+## Typed values
+
+Right-click any knob to open a value field. Type a value with its unit, such
+as `-6 dB`, `50%`, `1.2k`, or a model / mode name, then press Enter to commit
+or Escape to cancel.
+
 ## Build
 
 ```sh

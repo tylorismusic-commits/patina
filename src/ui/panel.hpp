@@ -55,6 +55,11 @@ public:
   void drawPresetList(cairo_t* cr, const Shared& shared,
                       const PanelState& state) const;
   bool wheel(Shared& shared, PanelState& state, double x, double y, double dy);
+  void beginTextEntry(Shared& shared, PanelState& state, double x, double y);
+  static constexpr int kTextEnter = 1;
+  static constexpr int kTextEscape = 2;
+  static constexpr int kTextBackspace = 3;
+  bool textKey(Shared& shared, PanelState& state, int key, char ch);
 
 private:
   enum class Kind {
@@ -104,6 +109,9 @@ private:
   void drawWidget(cairo_t* cr, const Widget& w, const Shared& shared,
                   const PanelState& state, int model) const;
   void drawKnob(cairo_t* cr, const Widget& w, double value, int model) const;
+  void drawTextEntry(cairo_t* cr, const Shared& shared) const;
+  bool commitTextEntry(Shared& shared, PanelState& state);
+  bool hitTextEntry(double x, double y) const;
   void drawPill(cairo_t* cr, const Widget& w, bool on, int model) const;
   void text(cairo_t* cr, const char* s, double x, double y, double size,
             int align, double r, double g, double b) const;
@@ -119,6 +127,14 @@ private:
   double dragStartValue_ = 0.0;
   double displayX_ = 182.0;
   double displayW_ = 546.0;
+
+  bool editing_ = false;
+  uint32_t editParam_ = 0;
+  std::string editText_;
+  double editBoxX_ = 0.0;
+  double editBoxY_ = 0.0;
+  static constexpr double kEditW = 150.0;
+  static constexpr double kEditH = 32.0;
 
   cairo_surface_t* grain_ = nullptr;
   void* ft_ = nullptr;

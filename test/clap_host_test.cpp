@@ -779,6 +779,20 @@ int main(int argc, char** argv) {
       }
 
       // A real drag must move a knob (catches the X11 event-mask bug).
+      auto rightClick = [&](int x, int y) {
+        XTestFakeMotionEvent(dpy, -1, originX + x, originY + y, CurrentTime);
+        XTestFakeButtonEvent(dpy, 3, True, CurrentTime);
+        XTestFakeButtonEvent(dpy, 3, False, CurrentTime);
+        XFlush(dpy);
+        std::this_thread::sleep_for(std::chrono::milliseconds(150));
+      };
+      auto key = [&](KeySym sym) {
+        const KeyCode code = XKeysymToKeycode(dpy, sym);
+        XTestFakeKeyEvent(dpy, code, True, CurrentTime);
+        XTestFakeKeyEvent(dpy, code, False, CurrentTime);
+        XFlush(dpy);
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+      };
       auto drag = [&](int x, int y, int dy) {
         x += originX;
         y += originY;
@@ -801,6 +815,13 @@ int main(int argc, char** argv) {
         params->get_value(plugin, id, &v);
         return v;
       };
+      rightClick(300, 455);
+      key(XK_minus);
+      key(XK_6);
+      key(XK_Return);
+      check(std::fabs(paramValue(patina::P_DRIVE) - 0.25) < 1e-4,
+            "right-click typed value enters -6 dB");
+
       auto pumpAudio = [&](int blocks) {
         for (int b = 0; b < blocks; ++b) {
           for (uint32_t i = 0; i < kFrames; ++i) {
