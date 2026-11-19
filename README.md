@@ -105,6 +105,8 @@ Render the panel previews:
 - [x] Five-model saturation engine with ADAA and Off/2×/4× oversampling
 - [x] Panel in the Comp Suite visual language (shape/scope/spectrum displays)
 - [x] Factory presets
+- [x] User preset bank: save, rename, duplicate, delete, export and drag-drop
+  import
 - [x] DSP tests
 - [x] Two-, three- and four-band multiband modes with per-band models and
   crossovers

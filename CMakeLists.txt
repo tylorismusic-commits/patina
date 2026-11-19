@@ -209,6 +209,14 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 add_test(NAME patina_dsp COMMAND patina_dsp_test)
 
+add_executable(patina_panel_test test/test_panel.cpp)
+target_link_libraries(patina_panel_test PRIVATE patina_ui)
+target_compile_features(patina_panel_test PRIVATE cxx_std_17)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(patina_panel_test PRIVATE -Wall -Wextra)
+endif()
+add_test(NAME patina_panel COMMAND patina_panel_test)
+
 if(LILV_FOUND)
   add_executable(patina_lv2_host_test test/lv2_host_test.cpp)
   target_include_directories(patina_lv2_host_test PRIVATE
