@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.7.0 — 2026-11-19
+
+- User preset bank: save, rename, duplicate, delete, export and drag-drop
+  import, alongside the factory presets.
+- Preset files live in `~/.config/Patina/presets` and export to
+  `~/Documents/Patina Presets`.
+
 ## 0.5.0 — 2026-11-16
 
 ### Added

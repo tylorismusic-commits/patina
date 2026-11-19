@@ -1,5 +1,7 @@
 # Patina
 
+**Version 0.7.0** · GPL-3.0-or-later
+
 A five-model saturation plugin for Linux, in the same visual language as Comp
 Suite. Patina runs as a quick single-band saturator or as a two-, three- or
 four-band multiband colour box with a different model per band. GPL-3.0-or-later.
