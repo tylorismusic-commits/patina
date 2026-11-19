@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.7.1 — 2026-11-19
+
+- Double-click a knob to reset it to the active preset's value, or the factory
+  default when no preset is active.
+
 ## 0.7.0 — 2026-11-19
 
 - User preset bank: save, rename, duplicate, delete, export and drag-drop

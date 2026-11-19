@@ -1340,6 +1340,26 @@ bool Panel::hitWidget(const Widget& w, double x, double y) const {
   }
 }
 
+double Panel::presetResetValue(const PanelState& state, uint32_t param) const {
+  double value = kParamSpecs[param].def;
+  if (state.presetIndex >= 0 && state.presetIndex < kPresetCount) {
+    const Preset& p = kPresets[state.presetIndex];
+    for (int i = 0; i < 32 && p.values[i].param >= 0; ++i) {
+      if (p.values[i].param == static_cast<int>(param)) {
+        value = p.values[i].value;
+        break;
+      }
+    }
+  } else if (state.presetIndex >= kPresetCount) {
+    const int user = state.presetIndex - kPresetCount;
+    if (user >= 0 && user < static_cast<int>(state.userPresets.size())) {
+      const auto& values = state.userPresets[static_cast<size_t>(user)].values;
+      if (param < values.size()) value = values[param];
+    }
+  }
+  return value;
+}
+
 bool Panel::pointerDown(Shared& shared, PanelState& state, double x, double y) {
   if (editing_) {
     if (hitTextEntry(x, y)) return true;
@@ -1351,11 +1371,23 @@ bool Panel::pointerDown(Shared& shared, PanelState& state, double x, double y) {
   for (const Widget& w : widgets_) {
     if (!hitWidget(w, x, y)) continue;
     switch (w.kind) {
-      case Kind::Knob:
+      case Kind::Knob: {
+        const double now = nowMs();
+        const bool twice = lastClickParam_ == static_cast<int>(w.param) &&
+                           now - lastClickTime_ <= kDoubleClickMs;
+        lastClickParam_ = static_cast<int>(w.param);
+        lastClickTime_ = now;
+        if (twice) {
+          shared.set(w.param, presetResetValue(state, w.param));
+          state.presetDirty = true;
+          dragParam_ = -1;
+          return true;
+        }
         dragParam_ = static_cast<int>(w.param);
         dragStartY_ = y;
         dragStartValue_ = shared.get(w.param);
         return false;
+      }
       case Kind::Power:
         shared.set(P_ENABLED, shared.get(P_ENABLED) > 0.5 ? 0.0 : 1.0);
         state.presetDirty = true;

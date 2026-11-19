@@ -79,6 +79,7 @@ public:
   bool importDroppedFile(Shared& shared, PanelState& state,
                          const std::string& path);
   bool commitPresetName(Shared& shared, PanelState& state);
+  double presetResetValue(const PanelState& state, uint32_t param) const;
   bool wheel(Shared& shared, PanelState& state, double x, double y, double dy);
   void beginTextEntry(Shared& shared, PanelState& state, double x, double y);
   static constexpr int kTextEnter = 1;
@@ -148,6 +149,9 @@ private:
   std::vector<Widget> widgets_;
   int dragParam_ = -1;
   bool dragCrossover_ = false;
+  int lastClickParam_ = -1;
+  double lastClickTime_ = 0.0;
+  static constexpr double kDoubleClickMs = 400.0;
   double dragStartY_ = 0.0;
   double dragStartValue_ = 0.0;
   double displayX_ = 182.0;

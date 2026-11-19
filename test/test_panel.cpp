@@ -1,6 +1,7 @@
 // Patina — panel/user preset interaction tests (no X server needed).
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+#include <cairo.h>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -95,6 +96,26 @@ int main() {
   check(panel.importDroppedFile(shared, state, exported.string()),
         "IMPORT accepts a dropped preset file");
   check(state.userPresets.size() == 2, "import adds a preset");
+
+
+  {
+    // Double-click resets a knob to the active preset's value.
+    panel.applyPreset(shared, state, kPresetCount);
+    const double presetDrive = state.userPresets[0].values[P_DRIVE];
+    shared.set(P_DRIVE, 0.9);
+    cairo_surface_t* surf = cairo_image_surface_create(
+        CAIRO_FORMAT_ARGB32, kPanelWidth, kPanelHeight);
+    cairo_t* cr = cairo_create(surf);
+    panel.draw(cr, shared, state);
+    panel.pointerDown(shared, state, 300, 455);
+    panel.pointerUp();
+    panel.pointerDown(shared, state, 300, 455);
+    panel.pointerUp();
+    check(std::fabs(shared.get(P_DRIVE) - presetDrive) < 1e-6,
+          "double click resets a knob to the preset value");
+    cairo_destroy(cr);
+    cairo_surface_destroy(surf);
+  }
 
   if (!oldXdg.empty()) setenv("XDG_CONFIG_HOME", oldXdg.c_str(), 1);
   else unsetenv("XDG_CONFIG_HOME");
