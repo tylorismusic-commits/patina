@@ -23,6 +23,10 @@
     a pset:Bank ;
     rdfs:label "Multiband" .
 
+<https://github.com/tylorismusic-commits/patina#bank_user>
+    a pset:Bank ;
+    rdfs:label "User" .
+
 <https://github.com/tylorismusic-commits/patina#preset_valve-vocal-warmth>
     a pset:Preset ;
     lv2:appliesTo <https://github.com/tylorismusic-commits/patina> ;
@@ -804,6 +808,62 @@
     [ lv2:symbol "band3_tone" ; pset:value 0.62 ] ,
     [ lv2:symbol "band3_mix" ; pset:value 0.65 ] ,
     [ lv2:symbol "band3_level" ; pset:value 0.46 ] ,
+    [ lv2:symbol "band3_on" ; pset:value 1 ] ,
+    [ lv2:symbol "bands" ; pset:value 4 ] .
+
+<https://github.com/tylorismusic-commits/patina#preset_a-touch-of-tape>
+    a pset:Preset ;
+    lv2:appliesTo <https://github.com/tylorismusic-commits/patina> ;
+    rdfs:label "A Touch of Tape" ;
+    rdfs:comment "User" ;
+    pset:bank <https://github.com/tylorismusic-commits/patina#bank_user> ;
+    lv2:port
+    [ lv2:symbol "model" ; pset:value 3 ] ,
+    [ lv2:symbol "power" ; pset:value 1 ] ,
+    [ lv2:symbol "drive" ; pset:value 0.105 ] ,
+    [ lv2:symbol "character" ; pset:value 0.34 ] ,
+    [ lv2:symbol "tone" ; pset:value 0.6 ] ,
+    [ lv2:symbol "mix" ; pset:value 1 ] ,
+    [ lv2:symbol "output" ; pset:value 0.5 ] ,
+    [ lv2:symbol "auto_gain" ; pset:value 1 ] ,
+    [ lv2:symbol "meter" ; pset:value 0 ] ,
+    [ lv2:symbol "oversample" ; pset:value 0 ] ,
+    [ lv2:symbol "multiband" ; pset:value 0 ] ,
+    [ lv2:symbol "xover_low" ; pset:value 120 ] ,
+    [ lv2:symbol "xover_high" ; pset:value 900 ] ,
+    [ lv2:symbol "xover_air" ; pset:value 5000 ] ,
+    [ lv2:symbol "band" ; pset:value 1 ] ,
+    [ lv2:symbol "band0_model" ; pset:value 0 ] ,
+    [ lv2:symbol "band0_input" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band0_drive" ; pset:value 0.45 ] ,
+    [ lv2:symbol "band0_character" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band0_tone" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band0_mix" ; pset:value 1 ] ,
+    [ lv2:symbol "band0_level" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band0_on" ; pset:value 1 ] ,
+    [ lv2:symbol "band1_model" ; pset:value 0 ] ,
+    [ lv2:symbol "band1_input" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band1_drive" ; pset:value 0.45 ] ,
+    [ lv2:symbol "band1_character" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band1_tone" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band1_mix" ; pset:value 1 ] ,
+    [ lv2:symbol "band1_level" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band1_on" ; pset:value 1 ] ,
+    [ lv2:symbol "band2_model" ; pset:value 0 ] ,
+    [ lv2:symbol "band2_input" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band2_drive" ; pset:value 0.45 ] ,
+    [ lv2:symbol "band2_character" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band2_tone" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band2_mix" ; pset:value 1 ] ,
+    [ lv2:symbol "band2_level" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band2_on" ; pset:value 1 ] ,
+    [ lv2:symbol "band3_model" ; pset:value 0 ] ,
+    [ lv2:symbol "band3_input" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band3_drive" ; pset:value 0.45 ] ,
+    [ lv2:symbol "band3_character" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band3_tone" ; pset:value 0.5 ] ,
+    [ lv2:symbol "band3_mix" ; pset:value 1 ] ,
+    [ lv2:symbol "band3_level" ; pset:value 0.5 ] ,
     [ lv2:symbol "band3_on" ; pset:value 1 ] ,
     [ lv2:symbol "bands" ; pset:value 4 ] .
 

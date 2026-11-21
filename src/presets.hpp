@@ -18,7 +18,7 @@ struct Preset {
   const char* category;
   int model;
   bool multiband;
-  PresetValue values[32];
+  PresetValue values[P_COUNT + 1];
 };
 
 inline constexpr Preset kPresets[] = {
@@ -114,7 +114,15 @@ inline constexpr Preset kPresets[] = {
       {bandParam(2, BF_MIX), 0.75f}, {bandParam(2, BF_LEVEL), 0.50f},
       {bandParam(3, BF_MODEL), 1.0f}, {bandParam(3, BF_DRIVE), 0.40f},
       {bandParam(3, BF_CHARACTER), 0.48f}, {bandParam(3, BF_TONE), 0.62f},
-      {bandParam(3, BF_MIX), 0.65f}, {bandParam(3, BF_LEVEL), 0.46f}}}
+      {bandParam(3, BF_MIX), 0.65f}, {bandParam(3, BF_LEVEL), 0.46f}}},
+    {"A Touch of Tape", "User", 3, false,
+     {      {0, 3.0f}, {1, 1.0f}, {2, 0.105f}, {3, 0.34f}, {4, 0.6f}, {5, 1.0f}, {6, 0.5f},
+      {7, 1.0f}, {8, 0.0f}, {9, 0.0f}, {10, 0.0f}, {11, 120.0f}, {12, 900.0f}, {13, 5000.0f},
+      {14, 1.0f}, {15, 0.0f}, {16, 0.5f}, {17, 0.45f}, {18, 0.5f}, {19, 0.5f}, {20, 1.0f},
+      {21, 0.5f}, {22, 1.0f}, {23, 0.0f}, {24, 0.5f}, {25, 0.45f}, {26, 0.5f}, {27, 0.5f},
+      {28, 1.0f}, {29, 0.5f}, {30, 1.0f}, {31, 0.0f}, {32, 0.5f}, {33, 0.45f}, {34, 0.5f},
+      {35, 0.5f}, {36, 1.0f}, {37, 0.5f}, {38, 1.0f}, {39, 0.0f}, {40, 0.5f}, {41, 0.45f},
+      {42, 0.5f}, {43, 0.5f}, {44, 1.0f}, {45, 0.5f}, {46, 1.0f}, {47, 4.0f}}},
 };
 
 inline constexpr int kPresetCount =
