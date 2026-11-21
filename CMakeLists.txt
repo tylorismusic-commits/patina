@@ -18,7 +18,15 @@ find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
 pkg_check_modules(CAIRO REQUIRED IMPORTED_TARGET cairo)
 pkg_check_modules(FREETYPE REQUIRED IMPORTED_TARGET freetype2)
-pkg_check_modules(X11 REQUIRED IMPORTED_TARGET x11)
+# The editor host is X11 today.  macOS builds the portable targets (DSP,
+# LV2, panel, tests) until the Cocoa view lands, so X11 stays optional.
+option(SUITE_NO_X11 "Skip X11 editor targets (portable subset)" OFF)
+if(APPLE OR SUITE_NO_X11)
+  set(SUITE_X11 OFF)
+else()
+  pkg_check_modules(X11 REQUIRED IMPORTED_TARGET x11)
+  set(SUITE_X11 ON)
+endif()
 pkg_check_modules(LV2 REQUIRED IMPORTED_TARGET lv2)
 pkg_check_modules(LILV QUIET IMPORTED_TARGET lilv-0)
 
@@ -49,6 +57,7 @@ endif()
 # ---------------------------------------------------------------------------
 # CLAP plugin: five saturation models, one X11/Cairo editor.
 # ---------------------------------------------------------------------------
+if(SUITE_X11)
 add_library(patina MODULE
   src/clap/patina_clap.cpp
   src/ui/panel.cpp)
@@ -81,8 +90,10 @@ add_custom_target(patina_bundle ALL
 install(TARGETS patina LIBRARY DESTINATION "${CLAP_DIR}")
 install(FILES ${PATINA_RESOURCE_FILES}
         DESTINATION "${CLAP_DIR}/Patina.resources")
+endif()  # SUITE_X11
 
 # Release tarballs: CLAP, LV2, and a combined Linux bundle.
+if(SUITE_X11)
 add_custom_target(dist-clap
   COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/dist"
   COMMAND ${CMAKE_COMMAND} -E tar czf
@@ -91,6 +102,7 @@ add_custom_target(dist-clap
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}/clap"
   DEPENDS patina_bundle
   COMMENT "Packing Patina-${PROJECT_VERSION} CLAP")
+endif()  # SUITE_X11
 
 add_custom_target(dist-lv2
   COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/dist"
@@ -101,6 +113,7 @@ add_custom_target(dist-lv2
   DEPENDS patina_lv2_bundle
   COMMENT "Packing Patina-${PROJECT_VERSION} LV2")
 
+if(SUITE_X11)
 add_custom_target(dist
   COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_BINARY_DIR}/dist"
   COMMAND ${CMAKE_COMMAND} -E tar czf
@@ -109,9 +122,11 @@ add_custom_target(dist
   WORKING_DIRECTORY "${CMAKE_BINARY_DIR}"
   DEPENDS patina_bundle patina_lv2_bundle
   COMMENT "Packing Patina-${PROJECT_VERSION} Linux bundle")
+endif()  # SUITE_X11
 
 find_library(XTST_LIBRARY Xtst)
 find_program(XVFB_RUN xvfb-run)
+if(SUITE_X11)
 add_executable(patina_clap_host_test test/clap_host_test.cpp)
 target_include_directories(patina_clap_host_test PRIVATE
   "${CMAKE_SOURCE_DIR}/src" "${CMAKE_SOURCE_DIR}/third_party/clap/include")
@@ -133,6 +148,7 @@ else()
   add_test(NAME patina_clap_host
     COMMAND patina_clap_host_test "${CMAKE_BINARY_DIR}/clap/Patina.clap")
 endif()
+endif()  # SUITE_X11
 
 # ---------------------------------------------------------------------------
 # LV2 build: same DSP and panel as CLAP, plus the LV2 UI and generated TTL.
@@ -151,6 +167,7 @@ set_target_properties(patina_lv2 PROPERTIES
   OUTPUT_NAME "patina"
   LIBRARY_OUTPUT_DIRECTORY "${LV2_BUNDLE_DIR}")
 
+if(SUITE_X11)
 add_library(patina_lv2_ui MODULE src/ui/lv2_ui.cpp src/ui/panel.cpp)
 target_include_directories(patina_lv2_ui PRIVATE "${CMAKE_SOURCE_DIR}/src")
 target_link_libraries(patina_lv2_ui PRIVATE
@@ -164,6 +181,7 @@ set_target_properties(patina_lv2_ui PROPERTIES
   PREFIX ""
   OUTPUT_NAME "patina_ui"
   LIBRARY_OUTPUT_DIRECTORY "${LV2_BUNDLE_DIR}")
+endif()  # SUITE_X11
 
 add_custom_target(patina_lv2_bundle ALL
   COMMAND ${CMAKE_COMMAND} -E make_directory "${LV2_BUNDLE_DIR}"
@@ -174,10 +192,17 @@ add_custom_target(patina_lv2_bundle ALL
           "${CMAKE_SOURCE_DIR}/assets/fonts/Jost-ExtraBold.ttf"
           "${CMAKE_SOURCE_DIR}/assets/fonts/OFL.txt"
           "${LV2_BUNDLE_DIR}/"
-  DEPENDS patina_lv2 patina_lv2_ui)
+  DEPENDS patina_lv2)
+if(SUITE_X11)
+  add_dependencies(patina_lv2_bundle patina_lv2_ui)
+endif()
 
-install(TARGETS patina_lv2 patina_lv2_ui
+install(TARGETS patina_lv2
         LIBRARY DESTINATION "${LV2_DIR}/patina.lv2")
+if(SUITE_X11)
+  install(TARGETS patina_lv2_ui
+          LIBRARY DESTINATION "${LV2_DIR}/patina.lv2")
+endif()
 install(FILES
   lv2/manifest.ttl
   lv2/patina.ttl
@@ -231,6 +256,7 @@ if(LILV_FOUND)
     COMMAND patina_lv2_host_test "${LV2_BUNDLE_DIR}")
 endif()
 
+if(SUITE_X11)
 add_executable(patina_lv2_ui_host_test test/lv2_ui_host_test.cpp)
 target_include_directories(patina_lv2_ui_host_test PRIVATE
   "${CMAKE_SOURCE_DIR}/src" ${PKG_CONFIG_LV2_INCLUDE_DIRS})
@@ -248,3 +274,4 @@ else()
   add_test(NAME patina_lv2_ui_host
     COMMAND patina_lv2_ui_host_test "${LV2_BUNDLE_DIR}")
 endif()
+endif()  # SUITE_X11
